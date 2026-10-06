@@ -1,0 +1,20 @@
+name: PR title
+
+# The pull request title becomes the commit message on main (squash merge) and so the changelog line:
+# it has to be a Conventional Commit, see CONTRIBUTING.md.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    name: Conventional title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
