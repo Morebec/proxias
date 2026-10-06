@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Proxias">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7cf57e"/>
+      <stop offset="1" stop-color="#3dd55f"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="32" fill="#1a1f29"/>
+  <circle cx="100" cy="100" r="80" fill="#242b36"/>
+  <!-- an intercepted request: it enters on the left, a deterministic path in the middle, the LLM fallback on the right -->
+  <rect x="52" y="62" width="20" height="76" rx="10" fill="url(#g)"/>
+  <rect x="90" y="62" width="20" height="50" rx="10" fill="url(#g)"/>
+  <rect x="128" y="62" width="20" height="76" rx="10" fill="url(#g)"/>
+</svg>
