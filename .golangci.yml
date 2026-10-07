@@ -1,0 +1,68 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # standard: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - bodyclose # the Body of a CompletionResponse is an io.ReadCloser
+    - contextcheck
+    - errname
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    revive:
+      rules:
+        # An SDK is read by its exported API: keep it documented.
+        - name: exported
+        - name: package-comments
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: receiver-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+      # Examples are documentation: they favor brevity over defensiveness.
+      - path: ^examples/
+        linters:
+          - gosec
+          - unparam
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/morebec/proxias

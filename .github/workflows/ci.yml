@@ -9,6 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint (golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # Keep in step with GOLANGCI_LINT in Taskfile.yml, so that `task lint` and CI agree.
+          version: v2.13.0
+
   check:
     name: Check (gofmt, vet, tests)
     runs-on: ubuntu-latest

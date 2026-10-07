@@ -1,0 +1,71 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  # Keep in step with `version:` of golangci-lint-action in .github/workflows/ci.yml, so that what passes
+  # here passes in CI. Run through `go run`: no binary to install, and none to be out of date.
+  GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0
+  DEADCODE: golang.org/x/tools/cmd/deadcode@v0.51.0
+
+tasks:
+  default:
+    desc: List the tasks
+    silent: true
+    cmds:
+      - task --list
+
+  check:
+    desc: Everything CI checks, in the same order
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: bench:smoke
+
+  test:
+    desc: Run the tests, with the race detector
+    cmds:
+      - go test -race ./... {{.CLI_ARGS}}
+
+  test:cover:
+    desc: Run the tests and write coverage.out (and print the coverage by function)
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+
+  lint:
+    desc: Run golangci-lint (the linters, and the formatters' check)
+    cmds:
+      - go run {{.GOLANGCI_LINT}} run ./... {{.CLI_ARGS}}
+
+  fmt:
+    desc: Format the code with the formatters of .golangci.yml
+    cmds:
+      - go run {{.GOLANGCI_LINT}} fmt ./...
+
+  fmt:check:
+    desc: Fail if a file is not gofmt-formatted
+    cmds:
+      - |
+        unformatted="$(gofmt -l .)"
+        if [ -n "$unformatted" ]; then echo "not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
+
+  bench:
+    desc: Run the benchmarks (the ControlPlane's own overhead)
+    cmds:
+      - go test -run '^$' -bench . -benchmem ./... {{.CLI_ARGS}}
+
+  bench:smoke:
+    desc: Run each benchmark 100 times, to see that it still runs
+    cmds:
+      - go test -run '^$' -bench . -benchtime 100x ./...
+
+  example:
+    desc: Run the basic example
+    cmds:
+      - go run ./examples/basic
+
+  deadcode:
+    desc: List the functions that no test or example reaches
+    cmds:
+      - go run {{.DEADCODE}} -test ./...
