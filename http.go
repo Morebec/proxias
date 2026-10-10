@@ -15,8 +15,8 @@ const maxRequestBytes = 32 << 20
 // HTTP, writing the response, and serving a ControlPlane as the endpoint of the OpenAI API. A host that
 // writes its own handler uses the first two.
 
-// DecodeChatCompletionRequest reads a chat completions request received over HTTP: its body, which it keeps byte for byte
-// in RawRequest, and its headers, of which it keeps a copy. An error is returned if the body cannot be read,
+// DecodeChatCompletionRequest reads a chat completions request received over HTTP: its body, and its headers, of
+// which it keeps a copy. An error is returned if the body cannot be read,
 // is not a JSON chat completions request, has no messages, or has a message whose content is neither a
 // string, a list nor null.
 //
@@ -36,7 +36,6 @@ func DecodeChatCompletionRequest(r *http.Request) (ChatCompletionRequest, error)
 		return ChatCompletionRequest{}, errors.New("proxias: the request has no messages")
 	}
 
-	req.RawRequest = body
 	req.Header = r.Header.Clone()
 	return req, nil
 }

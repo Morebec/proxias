@@ -80,13 +80,22 @@ func run(out io.Writer) error {
 		return errors.New("set ANTHROPIC_API_KEY to run this example")
 	}
 
-	controlPlane, err := proxias.NewControlPlane(
+	interception, err := proxias.NewWorkflowInterceptionMiddleware(
 		proxias.IntentClassifierFunc(classify),
 		workflows{},
 		proxias.WorkflowExecutionSynthesizerFunc(synthesize),
-		// The client reads ANTHROPIC_API_KEY. The key, the timeout and the retries are the host's to set.
-		anthropic.NewReasoningEngine(anthropicsdk.NewClient(), anthropicsdk.ModelClaudeHaiku4_5),
 	)
+	if err != nil {
+		return err
+	}
+
+	// The client reads ANTHROPIC_API_KEY. The key, the timeout and the retries are the host's to set.
+	reasoning, err := proxias.NewReasoningMiddleware(anthropic.NewReasoningEngine(anthropicsdk.NewClient(), anthropicsdk.ModelClaudeHaiku4_5))
+	if err != nil {
+		return err
+	}
+
+	controlPlane, err := proxias.NewControlPlane(interception, reasoning)
 	if err != nil {
 		return err
 	}

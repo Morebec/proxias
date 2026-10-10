@@ -6,6 +6,13 @@ vars:
   # here passes in CI. Run through `go run`: no binary to install, and none to be out of date.
   GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0
   DEADCODE: golang.org/x/tools/cmd/deadcode@v0.51.0
+  # The sandbox (examples/sandbox), and OpenClaw, which runs in a container so that nobody installs its dependencies.
+  # Its state is .sandbox/openclaw, not the user's OpenClaw setup.
+  SANDBOX_PORT: "8787"
+  SANDBOX_HOME: '{{.ROOT_DIR}}/.sandbox/openclaw'
+  SANDBOX_CONTAINER: proxias-sandbox-openclaw
+  SANDBOX_TOKEN: proxias-sandbox
+  OPENCLAW_IMAGE: ghcr.io/openclaw/openclaw:2026.9.7
 
 tasks:
   default:
@@ -69,3 +76,51 @@ tasks:
     desc: List the functions that no test or example reaches
     cmds:
       - go run {{.DEADCODE}} -test ./...
+
+  sandbox:
+    desc: Run the middleware sandbox (examples/sandbox), the endpoint a harness talks to. SANDBOX_PORT=... changes its port
+    env:
+      PROXIAS_ADDR: ":{{.SANDBOX_PORT}}"
+    cmds:
+      - go run ./examples/sandbox
+
+  sandbox:openclaw:
+    desc: Run OpenClaw in a container, configured to use the sandbox (run sandbox first). Its gateway is on :18789. Needs Docker
+    preconditions:
+      - sh: docker info > /dev/null 2>&1
+        msg: "Docker is needed: OpenClaw runs in a container"
+    cmds:
+      # A fresh state each run: a lease or a backup left by a previous run would stop the gateway, or bring back an old config.
+      - rm -rf {{.SANDBOX_HOME}}
+      - mkdir -p {{.SANDBOX_HOME}}
+      - |
+        cat > {{.SANDBOX_HOME}}/openclaw.json <<'JSON'
+        {
+          "gateway": { "mode": "local" },
+          "agents": { "defaults": { "model": { "primary": "proxias/proxias-sandbox" } } },
+          "models": {
+            "mode": "merge",
+            "providers": {
+              "proxias": {
+                "baseUrl": "http://host.docker.internal:{{.SANDBOX_PORT}}/v1",
+                "apiKey": "proxias-sandbox",
+                "api": "openai-completions",
+                "models": [
+                  { "id": "proxias-sandbox", "name": "Proxias sandbox", "reasoning": false, "input": ["text"], "contextWindow": 128000 }
+                ]
+              }
+            }
+          }
+        }
+        JSON
+      - docker run --rm --name {{.SANDBOX_CONTAINER}} -p 127.0.0.1:18789:18789 --add-host=host.docker.internal:host-gateway -e OPENCLAW_STATE_DIR=/openclaw -e OPENCLAW_CONFIG_PATH=/openclaw/openclaw.json -v {{.SANDBOX_HOME}}:/openclaw {{.OPENCLAW_IMAGE}} openclaw gateway --bind lan --auth token --token {{.SANDBOX_TOKEN}}
+
+  sandbox:openclaw:dashboard:
+    desc: Print the link to the OpenClaw Control UI of sandbox:openclaw, with its token already in it
+    cmds:
+      - echo "Open http://127.0.0.1:18789/#token={{.SANDBOX_TOKEN}}"
+
+  sandbox:openclaw:agent:
+    desc: Send a message to the OpenClaw of sandbox:openclaw, through its gateway. The message is the argument, after --
+    cmds:
+      - docker exec -e OPENCLAW_GATEWAY_TOKEN={{.SANDBOX_TOKEN}} {{.SANDBOX_CONTAINER}} openclaw agent --message "{{.CLI_ARGS}}" --timeout 120

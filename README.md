@@ -41,7 +41,7 @@ import "github.com/morebec/proxias"
 | `WorkflowExecutionSynthesizer` | **the reply** to a request that ran workflows: makes the response from the intent and the results | usually one LLM call, or templates |
 | `ReasoningEngine` | **the reply** to a request no workflow fits: open-ended reasoning | the LLM, as it would be without Proxias |
 
-`proxias.NewControlPlane(classifier, workflows, synthesizer, reasoner, options...)` wires them into a `ControlPlane`, whose one method is `Process`. It returns an error, never panics, if any of the four is nil. `IntentClassifierFunc` and `WorkflowExecutionSynthesizerFunc` make one of a function.
+`proxias.NewWorkflowInterceptionMiddleware(classifier, workflows, synthesizer)` and `proxias.NewReasoningMiddleware(reasoner)` make the two steps of the chain, and `proxias.NewControlPlane(middlewares...)` wires them into a `ControlPlane`, whose one method is `Process`. They return an error, never panic, on a nil component or an empty chain. `IntentClassifierFunc` and `WorkflowExecutionSynthesizerFunc` make one of a function.
 
 ### Two stages in one classifier
 
@@ -80,13 +80,14 @@ ChatCompletionRequest
 4. Synthesize()  ─▶  ChatCompletionResponse                     ─▶  ChatCompletionResponse
 ```
 
-`ControlPlane.Process(ctx, req)`:
+`ControlPlane.Process(ctx, req)` runs the request through its middleware, in order. The first one that answers bypasses the rest:
 
-1. **Describe.** `WorkflowDescriptors` lists the workflows: an ID, a name, a description, and the JSON Schema of their parameters (`InputSchema`).
-2. **Classify.** Unless there are no workflows, `Classify` is given the request and the descriptors, and answers an `Intent`.
-3. **Run.** If the `Intent` names workflows, `ExecuteWorkflows` runs them, all in one call, and answers a `WorkflowExecutionResult` for each.
-4. **Synthesize.** `WorkflowExecutionSynthesizer.Synthesize` is given a `WorkflowExecutionSynthesis` (the request, the intent and the results) and returns the `ChatCompletionResponse`.
-5. **Or reason.** For a reasoning intent, `ReasoningEngine.Reason` is given the request and the descriptors and returns the `ChatCompletionResponse`. Nothing is synthesized.
+1. **Describe and classify** (`WorkflowInterceptionMiddleware`). `WorkflowDescriptors` lists the workflows: an ID, a name, a description, and the JSON Schema of their parameters (`InputSchema`). Unless there are none, `Classify` answers an `Intent`.
+2. **Run and synthesize.** If the `Intent` names workflows, `ExecuteWorkflows` runs them, all in one call, and `Synthesize` answers with a `ChatCompletionResponse`, made of the request, the intent and the results.
+3. **Or pass on.** Without a workflow, the middleware calls the next step with the workflow descriptors in the context.
+4. **Reason** (`ReasoningMiddleware`, the last step). `ReasoningEngine.Reason` is given the request and the descriptors, and answers. Nothing is synthesized.
+
+A step can change the request before it passes it on, for instance to route the model, and it can add to the context. See [Middleware](#middleware).
 
 The model of Proxias is the OpenAI chat completions API: a `ChatCompletionRequest` is its request (messages with text and image parts, tool calls and results, tools, cache breakpoints, `stream`), and a `ChatCompletionResponse` is an HTTP response (a status, headers and a body) in its format. A reasoning engine can forward the upstream's response untouched, a stream included; a workflow's reply is made with `NewChatCompletionResponse` or `NewChatCompletionStream`. An adapter for another provider maps to and from this model at its edge.
 
@@ -97,24 +98,28 @@ A runnable hello world is in [examples/basic](examples/basic): one workflow that
 
 ### Embedding in a Server: intercepting HTTP requests
 
-Proxias is not a server: the transport stays the host's. The model of Proxias is the OpenAI chat completions API, which the root package serves: `proxias.DecodeChatCompletionRequest` turns an `*http.Request` into a `proxias.ChatCompletionRequest` (the body, kept byte for byte, and the headers), and `proxias.NewChatCompletionHandler` serves a `ControlPlane` over `net/http`. With it, a server answers what its workflows can and forwards the rest to the upstream LLM.
+Proxias is not a server: the transport stays the host's. The model of Proxias is the OpenAI chat completions API, which the root package serves: `proxias.DecodeChatCompletionRequest` turns an `*http.Request` into a `proxias.ChatCompletionRequest` (the body, and the headers), and `proxias.NewChatCompletionHandler` serves a `ControlPlane` over `net/http`. With it, a server answers what its workflows can and forwards the rest to the upstream LLM.
 
 ```go
-controlPlane, err := proxias.NewControlPlane(
+interception, err := proxias.NewWorkflowInterceptionMiddleware(
 	proxias.NewCompositeIntentClassifier(selector, extractor),
 	workflows,
 	proxias.WorkflowExecutionSynthesizerFunc(
 		func(ctx context.Context, s proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 			return upstream.Summarize(ctx, s) // one LLM pass over the workflows' results
 		}),
-	reasoner, // forwards the request to the upstream LLM, byte for byte (ChatCompletionRequest.Request)
 )
 if err != nil {
 	return err
 }
-
-mux := http.NewServeMux()
-mux.Handle("POST /v1/chat/completions", proxias.NewChatCompletionHandler(controlPlane))
+reasoning, err := proxias.NewReasoningMiddleware(reasoner) // forwards the request to the upstream LLM, its unnamed fields included
+if err != nil {
+	return err
+}
+controlPlane, err := proxias.NewControlPlane(interception, reasoning)
+if err != nil {
+	return err
+}
 ```
 
 The handler answers 400 for a body that is not a chat completions request (413 if it is too large), and 502, without saying why, when the control plane fails: log that error yourself, for instance with a `ControlPlane` that decorates yours. A response body is flushed as it is read, so a stream reaches the client as it is produced. To write your own handler, use `proxias.DecodeChatCompletionRequest` to read the request and `proxias.WriteChatCompletionResponse` to write the response.
@@ -124,7 +129,9 @@ The handler answers 400 for a body that is not a chat completions request (413 i
 The agent answers the host application's admin commands, typed or spoken, without an LLM round trip for each.
 
 ```go
-controlPlane, err := proxias.NewControlPlane(adminCommands, adminWorkflows, adminSynthesizer, assistant)
+interception, _ := proxias.NewWorkflowInterceptionMiddleware(adminCommands, adminWorkflows, adminSynthesizer)
+reasoning, _ := proxias.NewReasoningMiddleware(assistant)
+controlPlane, _ := proxias.NewControlPlane(interception, reasoning) // in a host, check the errors, as above
 
 response, err := controlPlane.Process(ctx, proxias.ChatCompletionRequest{Messages: []proxias.ChatMessage{
 	{Role: proxias.ChatMessageRoleUser, Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: transcript}}}, // from the chat box or speech-to-text
@@ -144,6 +151,29 @@ reasoner := anthropic.NewReasoningEngine(client, anthropicsdk.ModelClaudeSonnet4
 ```
 
 A failing call returns the SDK's error, wrapped: `errors.As` an `*anthropicsdk.Error` for its status code, even when the harness asked for a stream. Claude's thinking is not returned: chat completions have no place for it. 
+
+## Middleware
+
+A `ControlPlane` is a chain of middleware: the first step that answers a request bypasses the rest. `proxias.Middleware` is a function that receives the rest of the chain as `next` and returns its own step. A step can:
+
+- **answer**, as the reasoning middleware does (it is always the last step);
+- **pass on**, after changing the request, for instance to route the model: `req.Model = chooseModel(req)` and `return next(ctx, req)`;
+- **add to the context** what the rest needs, with `proxias.WithWorkflowDescriptors` and `proxias.WorkflowDescriptorsFrom`. This is how the reasoning engine knows what the application can do.
+
+A request is passed by value, but its slices and maps are shared with the caller, so a step replaces them rather than editing them (`req.Messages = append([]proxias.ChatMessage{system}, req.Messages...)`). The fields of the request that the model does not name are kept, and written back when the request is forwarded.
+
+## Trying it with a real harness
+
+`examples/sandbox` is a sandbox for the chain: it serves a `ControlPlane` as the OpenAI chat completions endpoint, with one workflow, and a stub reasoning engine unless `ANTHROPIC_API_KEY` is set. To try a middleware, change `buildControlPlane` and restart. A real harness talks to it: OpenClaw runs in a Docker container, so nothing else needs installing.
+
+```sh
+task sandbox                                 # the sandbox, on :8787 (SANDBOX_PORT=... to change it)
+task sandbox:openclaw                        # OpenClaw in a container, configured to use the sandbox
+task sandbox:openclaw:agent -- "say hello"   # send it a message, through its gateway
+task sandbox:openclaw:dashboard          # the link to its Control UI, token included
+```
+
+`sandbox:openclaw` starts from a fresh state directory, `.sandbox/openclaw`, so it never touches your own OpenClaw setup. Its gateway and Control UI are on `127.0.0.1:18789` only, and the token is fixed (`proxias-sandbox`), so the dashboard link from `sandbox:openclaw:dashboard` opens without a prompt for it. The first visit from a browser may still ask to pair the device once.
 
 ## Performance
 

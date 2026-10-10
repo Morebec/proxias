@@ -80,7 +80,7 @@ func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *te
 	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, someModel)
 	synthesis := restartedSynthesis
 	synthesis.Request.Stream = true
-	synthesis.Request.StreamOptions = proxias.ChatStreamOptions{IncludeUsage: true}
+	synthesis.Request.StreamOptions = &proxias.ChatStreamOptions{IncludeUsage: true}
 
 	// When
 	got, err := synthesizer.Synthesize(t.Context(), synthesis)

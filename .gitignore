@@ -19,3 +19,6 @@ vendor/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# The sandbox's state (task sandbox:openclaw)
+.sandbox/

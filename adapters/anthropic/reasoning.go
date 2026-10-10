@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -46,10 +47,14 @@ func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model, op
 //
 // The answer is streamed if req.Stream is set. An error of the API is returned, wrapped, even for a stream:
 // the first event is read before the response is.
-func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, _ []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 	params, err := mapChatCompletionRequestToMessageParams(req, e.model)
 	if err != nil {
 		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: map the request: %w", err)
+	}
+	if len(descs) != 0 {
+		// After the harness's own system blocks, so that the prefix of the harness's prompt stays cached.
+		params.System = append(params.System, workflowsBlock(descs))
 	}
 
 	if !req.Stream {
@@ -69,5 +74,17 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 		}
 		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
 	}
-	return proxias.NewChatCompletionStream(mapChunks(stream, req.StreamOptions.IncludeUsage)), nil
+	return proxias.NewChatCompletionStream(mapChunks(stream, req.UsageRequested())), nil
+}
+
+// workflowsBlock tells the model what the application can do by running workflows, so that it answers a question
+// about its capabilities accurately. The workflows are listed by name and description: their schemas are for the
+// classifier, not for the reasoning.
+func workflowsBlock(descs []proxias.WorkflowDescriptor) anthropicsdk.TextBlockParam {
+	var text strings.Builder
+	text.WriteString("The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n")
+	for _, d := range descs {
+		fmt.Fprintf(&text, "- %s: %s\n", d.Name, d.Description)
+	}
+	return anthropicsdk.TextBlockParam{Text: text.String()}
 }

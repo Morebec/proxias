@@ -201,3 +201,81 @@ func TestChatContentText(t *testing.T) {
 	assert.Equal(t, "what is\nthis?", content.Text(), "the text parts, joined by new lines")
 	assert.Empty(t, proxias.ChatContent(nil).Text())
 }
+
+func TestChatCompletionRequestKeepsTheFieldsItDoesNotName(t *testing.T) {
+	// Given a request with fields at every level that the model does not name
+	body := `{
+		"model":"m","temperature":0.2,"response_format":{"type":"json_object"},
+		"messages":[
+			{"role":"user","name":"ada","content":[
+				{"type":"text","text":"listen","input_audio":{"format":"wav"}},
+				{"type":"image_url","image_url":{"url":"https://x/y.png","detail":"high","extra":1}}
+			]},
+			{"role":"assistant","reasoning_content":"hm","content":null,"tool_calls":[
+				{"id":"c1","type":"function","index":0,"function":{"name":"restart","arguments":"{}","strict":true}}]}
+		],
+		"tools":[{"type":"function","strict":true,"function":{"name":"restart","parameters":{"type":"object"}}}]
+	}`
+
+	// When it is read and written back
+	var req proxias.ChatCompletionRequest
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+	got, err := json.Marshal(req)
+
+	// Then nothing is lost
+	require.NoError(t, err)
+	assert.JSONEq(t, body, string(got))
+}
+
+func TestChatCompletionRequestEditedFieldsWin(t *testing.T) {
+	// Given a request whose model is changed by a middleware, and whose message keeps an unknown field
+	var req proxias.ChatCompletionRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"small","messages":[{"role":"user","name":"ada","content":"hi"}]}`), &req))
+	req.Model = "large"
+	req.Messages[0].Name = "grace"
+
+	// When it is written
+	got, err := json.Marshal(req)
+
+	// Then the edits are sent, and the field that was not edited is kept
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"large","messages":[{"role":"user","name":"grace","content":"hi"}]}`, string(got))
+}
+
+func TestChatCompletionRequestExtraNeverOverridesATypedField(t *testing.T) {
+	// Given an extra field that has the name of a typed one, which the typed field replaces
+	req := proxias.ChatCompletionRequest{Model: "large", Messages: []proxias.ChatMessage{{Role: proxias.ChatMessageRoleUser}}, Extra: map[string]json.RawMessage{"model": json.RawMessage(`"small"`), "seed": json.RawMessage(`7`)}}
+
+	// When it is written
+	got, err := json.Marshal(req)
+
+	// Then the typed field is sent, and the other extra is
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"large","messages":[{"role":"user","content":null}],"seed":7}`, string(got))
+}
+
+func TestChatCompletionRequestWithoutOptionalFieldsGainsNone(t *testing.T) {
+	// Given a request that does not stream, nor names a model
+	var req proxias.ChatCompletionRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"messages":[{"role":"user","content":"hi"}]}`), &req))
+
+	// When it is written
+	got, err := json.Marshal(req)
+
+	// Then it gains no stream, nor stream options, which OpenAI refuses without a stream
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"messages":[{"role":"user","content":"hi"}]}`, string(got))
+	assert.Nil(t, req.Extra)
+}
+
+func TestChatContentWithAnExtraIsNotACollapsedString(t *testing.T) {
+	// Given a lone text part that carries a field of its own
+	content := proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: "listen", Extra: map[string]json.RawMessage{"input_audio": json.RawMessage(`{"format":"wav"}`)}}}
+
+	// When it is written
+	got, err := json.Marshal(content)
+
+	// Then it stays a part, so the field is not lost
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"type":"text","text":"listen","input_audio":{"format":"wav"}}]`, string(got))
+}

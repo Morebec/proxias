@@ -21,9 +21,17 @@ type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
 
+// assertSameJSON asserts that v marshals to the JSON of body: the same content, not the same bytes.
+func assertSameJSON(t *testing.T, body string, v any) {
+	t.Helper()
+	got, err := json.Marshal(v)
+	require.NoError(t, err)
+	assert.JSONEq(t, body, string(got), "the request, marshalled, is the body it was read from")
+}
+
 func TestDecodeChatCompletionRequest(t *testing.T) {
 	type expect struct {
-		request proxias.ChatCompletionRequest // without RawRequest, which is the body in every case, and Header
+		request proxias.ChatCompletionRequest // without Header, which is not in the body
 		err     assert.ErrorAssertionFunc
 	}
 	falseValue := false
@@ -34,7 +42,6 @@ func TestDecodeChatCompletionRequest(t *testing.T) {
 		name  string
 		given string // the body
 		then  expect
-		// NOTE All tests ensure that the RawRequest field is correctly populated with the original body.
 	}{
 		{
 			name: "canonical",
@@ -56,7 +63,7 @@ func TestDecodeChatCompletionRequest(t *testing.T) {
 				request: proxias.ChatCompletionRequest{
 					Model:               "m",
 					Stream:              true,
-					StreamOptions:       proxias.ChatStreamOptions{IncludeUsage: true},
+					StreamOptions:       &proxias.ChatStreamOptions{IncludeUsage: true},
 					MaxCompletionTokens: 100,
 					Stop:                json.RawMessage(`["END"]`),
 					ToolChoice:          json.RawMessage(`"auto"`),
@@ -79,12 +86,13 @@ func TestDecodeChatCompletionRequest(t *testing.T) {
 			},
 		},
 		{
-			name:  "GIVEN a field that the request does not name THEN it is kept in the body, byte for byte",
+			name:  "GIVEN a field that the request does not name THEN it is kept in Extra",
 			given: `{"model":"m","unknown_field":1,"messages":[{"role":"user","content":"hello"}]}`,
 			then: expect{
 				request: proxias.ChatCompletionRequest{
 					Model:    "m",
 					Messages: []proxias.ChatMessage{{Role: proxias.ChatMessageRoleUser, Content: text("hello")}},
+					Extra:    map[string]json.RawMessage{"unknown_field": json.RawMessage(`1`)},
 				},
 				err: assert.NoError,
 			},
@@ -143,7 +151,6 @@ func TestDecodeChatCompletionRequest(t *testing.T) {
 				return
 			}
 			want := tt.then.request
-			want.RawRequest = []byte(tt.given)
 			want.Header = http.Header{}
 			assert.Equal(t, want, got)
 		})
@@ -200,7 +207,7 @@ func TestDecodeChatCompletionRequestKeepsAHeadersCopy(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, "m", got.Model)
-			assert.Equal(t, body, string(got.RawRequest), "the body, byte for byte")
+			assertSameJSON(t, body, got)
 			assert.Equal(t, tt.then.header, got.Header)
 
 			r.Header.Set("X-Request-Id", "changed")
@@ -458,8 +465,8 @@ func TestChatCompletionHandlerGivesTheControlPlaneTheDecodedRequest(t *testing.T
 	req.Header.Set("X-Request-Id", "r1")
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
-	// Then it is the decoded one, with the body kept byte for byte and the header
-	assert.Equal(t, completionRequestBody, string(asked.RawRequest))
+	// Then it is the decoded one, with the body and the header
+	assertSameJSON(t, completionRequestBody, asked)
 	assert.Equal(t, "m", asked.Model)
 	assert.Equal(t, "r1", asked.Header.Get("X-Request-Id"))
 }

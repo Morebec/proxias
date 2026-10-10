@@ -62,7 +62,7 @@ func (s *WorkflowExecutionSynthesizer) Synthesize(ctx context.Context, synthesis
 	if !synthesis.Request.Stream {
 		return proxias.NewChatCompletionResponse(mapChatCompletion(message))
 	}
-	return proxias.NewChatCompletionStream(streamOf(message, text, synthesis.Request.StreamOptions.IncludeUsage)), nil
+	return proxias.NewChatCompletionStream(streamOf(message, text, synthesis.Request.UsageRequested())), nil
 }
 
 // streamOf is the stream of a whole reply, as Claude's stream would have sent it: the role, the text, the finish

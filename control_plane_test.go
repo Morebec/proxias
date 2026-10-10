@@ -444,89 +444,52 @@ func (e *panicWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias
 	panic(e.panicMsg)
 }
 
-// newControlPlane makes a ControlPlane of components that are all given.
+// newControlPlane makes a ControlPlane of the two middleware, which the components are given to.
 func newControlPlane(tb testing.TB, classifier proxias.IntentClassifier, engine proxias.WorkflowExecutionEngine, synthesizer proxias.WorkflowExecutionSynthesizer, reasoner proxias.ReasoningEngine) proxias.ControlPlane {
 	tb.Helper()
-	controlPlane, err := proxias.NewControlPlane(classifier, engine, synthesizer, reasoner)
+	interception, err := proxias.NewWorkflowInterceptionMiddleware(classifier, engine, synthesizer)
+	require.NoError(tb, err)
+	reasoning, err := proxias.NewReasoningMiddleware(reasoner)
+	require.NoError(tb, err)
+	controlPlane, err := proxias.NewControlPlane(interception, reasoning)
 	require.NoError(tb, err)
 	return controlPlane
 }
 
 func TestNewControlPlane(t *testing.T) {
-	type assumptions struct {
-		classifier              proxias.IntentClassifier
-		workflowExecutionEngine proxias.WorkflowExecutionEngine
-		synthesizer             proxias.WorkflowExecutionSynthesizer
-		reasoningEngine         proxias.ReasoningEngine
-	}
 	tests := []struct {
-		name  string
-		given assumptions
-		then  string // error message if any
+		name        string
+		given       []proxias.Middleware
+		errContains string
 	}{
 		{
-			name: "GIVEN all four components THEN a control plane is created",
-			given: assumptions{
-				classifier:              mockClassifier(proxias.Intent{}, nil),
-				workflowExecutionEngine: mockWorkflowExecutionEngine{},
-				synthesizer:             mockWorkflowExecutionSynthesizer(someResponse, nil),
-				reasoningEngine:         mockReasoningEngine(someResponse, nil),
-			},
-			then: "",
+			name:  "canonical",
+			given: []proxias.Middleware{passThrough},
 		},
 		{
-			name: "GIVEN no IntentClassifier THEN it fails",
-			given: assumptions{
-				classifier:              nil,
-				workflowExecutionEngine: mockWorkflowExecutionEngine{},
-				synthesizer:             mockWorkflowExecutionSynthesizer(someResponse, nil),
-				reasoningEngine:         mockReasoningEngine(someResponse, nil),
-			},
-			then: "IntentClassifier",
+			name:        "GIVEN no middleware THEN it fails",
+			errContains: "needs a Middleware",
 		},
 		{
-			name: "GIVEN no WorkflowExecutionEngine THEN it fails",
-			given: assumptions{
-				classifier:              mockClassifier(proxias.Intent{}, nil),
-				workflowExecutionEngine: nil,
-				synthesizer:             mockWorkflowExecutionSynthesizer(someResponse, nil),
-				reasoningEngine:         mockReasoningEngine(someResponse, nil),
-			},
-			then: "WorkflowExecutionEngine",
-		},
-		{
-			name: "GIVEN no WorkflowExecutionSynthesizer THEN it fails",
-			given: assumptions{
-				classifier:              mockClassifier(proxias.Intent{}, nil),
-				workflowExecutionEngine: mockWorkflowExecutionEngine{},
-				synthesizer:             nil,
-				reasoningEngine:         mockReasoningEngine(someResponse, nil),
-			},
-			then: "Synthesizer",
-		},
-		{
-			name: "GIVEN no ReasoningEngine THEN it fails",
-			given: assumptions{
-				classifier:              mockClassifier(proxias.Intent{}, nil),
-				workflowExecutionEngine: mockWorkflowExecutionEngine{},
-				synthesizer:             mockWorkflowExecutionSynthesizer(someResponse, nil),
-				reasoningEngine:         nil,
-			},
-			then: "ReasoningEngine",
+			name:        "GIVEN a nil middleware THEN it fails and says which one",
+			given:       []proxias.Middleware{passThrough, nil},
+			errContains: "the one at 1 is nil",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controlPlane, err := proxias.NewControlPlane(tt.given.classifier, tt.given.workflowExecutionEngine, tt.given.synthesizer, tt.given.reasoningEngine)
+			controlPlane, err := proxias.NewControlPlane(tt.given...)
 
-			if tt.then == "" {
-				require.NoError(t, err)
-				assert.NotNil(t, controlPlane)
-			} else {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.then)
+			if tt.errContains != "" {
+				assert.ErrorContains(t, err, tt.errContains)
 				assert.Nil(t, controlPlane)
+				return
 			}
+			require.NoError(t, err)
+			assert.NotNil(t, controlPlane)
 		})
 	}
 }
+
+// passThrough is a middleware that leaves the request to the rest of the chain.
+func passThrough(next proxias.ProcessFunc) proxias.ProcessFunc { return next }

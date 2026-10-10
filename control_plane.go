@@ -6,14 +6,12 @@ import (
 	"fmt"
 )
 
-// ControlPlane turns a request into a response, either by running workflows or by reasoning.
-// It is the entry point of the SDK: an IntentClassifier names which of the
-// WorkflowExecutionEngine's workflows the request asks for (and with which parameters), the
-// WorkflowExecutionEngine runs them, and the WorkflowExecutionSynthesizer makes the response. A request that
-// asks for no workflow is answered by the ReasoningEngine.
+// ControlPlane answers a request by running it through a chain of Middleware: the first step that answers it
+// bypasses the rest. A chain of a WorkflowInterceptionMiddleware, which runs the workflows a request asks for,
+// and then a ReasoningMiddleware, which answers the rest, is the usual one.
 type ControlPlane interface {
-	// Process answers req. An error is an infrastructure failure of one of the stages, or of the context:
-	// a workflow that cannot run for a reason the user should hear of is not an error, it is a
+	// Process answers req. An error is an infrastructure failure of one of the steps, or of the context: a
+	// workflow that cannot run for a reason the user should hear of is not an error, it is a
 	// WorkflowExecutionResult for the synthesizer.
 	//
 	// Process does not recover from panics: the host does, if it wants to.
@@ -21,114 +19,37 @@ type ControlPlane interface {
 }
 
 // controlPlane is the ControlPlane made by NewControlPlane. It is safe for concurrent use as long as the
-// components it was made of are.
+// middleware it was made of are.
 type controlPlane struct {
-	intentClassifier             IntentClassifier
-	workflowExecutionEngine      WorkflowExecutionEngine
-	workflowExecutionSynthesizer WorkflowExecutionSynthesizer
-	reasoningEngine              ReasoningEngine
+	process ProcessFunc
 }
 
-// NewControlPlane makes a ControlPlane. It returns an error if any of the four components is nil.
-func NewControlPlane(
-	classifier IntentClassifier,
-	workflowEngine WorkflowExecutionEngine,
-	synthesizer WorkflowExecutionSynthesizer,
-	reasoningEngine ReasoningEngine,
-	options ...ControlPlaneOption,
-) (ControlPlane, error) {
-	switch {
-	case classifier == nil:
-		return nil, errors.New("proxias: NewControlPlane needs an IntentClassifier")
-	case workflowEngine == nil:
-		return nil, errors.New("proxias: NewControlPlane needs a WorkflowExecutionEngine")
-	case synthesizer == nil:
-		return nil, errors.New("proxias: NewControlPlane needs a Synthesizer")
-	case reasoningEngine == nil:
-		return nil, errors.New("proxias: NewControlPlane needs a ReasoningEngine")
+// NewControlPlane makes a ControlPlane of the middleware, in the order they are given: the first is the first
+// to see a request. It returns an error if there is none, or if one of them is nil.
+//
+// The chain is built once, here, so that a request costs only the calls of the steps it goes through.
+func NewControlPlane(middlewares ...Middleware) (ControlPlane, error) {
+	if len(middlewares) == 0 {
+		return nil, errors.New("proxias: NewControlPlane needs a Middleware")
 	}
 
-	e := &controlPlane{}
-	for _, option := range options {
-		option(e)
+	process := ProcessFunc(func(context.Context, ChatCompletionRequest) (ChatCompletionResponse, error) {
+		return ChatCompletionResponse{}, errors.New("proxias: no middleware answered the request")
+	})
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		if middlewares[i] == nil {
+			return nil, fmt.Errorf("proxias: NewControlPlane needs a Middleware, but the one at %d is nil", i)
+		}
+		process = middlewares[i](process)
 	}
 
-	e.intentClassifier = classifier
-	e.workflowExecutionEngine = workflowEngine
-	e.workflowExecutionSynthesizer = synthesizer
-	e.reasoningEngine = reasoningEngine
-
-	return e, nil
+	return &controlPlane{process: process}, nil
 }
 
 // Process implements ControlPlane.
-func (e *controlPlane) Process(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
+func (c *controlPlane) Process(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return ChatCompletionResponse{}, err
 	}
-
-	workflowDescs, err := e.workflowExecutionEngine.WorkflowDescriptors(ctx, req)
-	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: list workflow descriptors: %w", err)
-	}
-
-	// Without workflows there is nothing to choose amongst: no need to ask the classifier.
-	var intent Intent
-
-	if len(workflowDescs) != 0 {
-		intent, err = e.intentClassifier.Classify(ctx, req, workflowDescs)
-		if err != nil {
-			return ChatCompletionResponse{}, fmt.Errorf("proxias: classify intent: %w", err)
-		}
-	}
-
-	if intent.IsReasoningIntent() {
-		return e.processOpenEndedReasoningIntent(ctx, req, workflowDescs)
-	}
-
-	return e.processWorkflowExecutionIntent(ctx, req, intent)
-}
-
-func (e *controlPlane) processOpenEndedReasoningIntent(
-	ctx context.Context,
-	req ChatCompletionRequest,
-	workflowDescs []WorkflowDescriptor,
-) (ChatCompletionResponse, error) {
-	response, err := e.reasoningEngine.Reason(ctx, req, workflowDescs)
-	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: reason: %w", err)
-	}
-
-	return response, nil
-}
-
-func (e *controlPlane) processWorkflowExecutionIntent(
-	ctx context.Context,
-	req ChatCompletionRequest,
-	intent Intent,
-) (ChatCompletionResponse, error) {
-	results, err := e.workflowExecutionEngine.ExecuteWorkflows(ctx, req, intent.WorkflowExecutions)
-	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: %w", err)
-	}
-
-	if len(results) != len(intent.WorkflowExecutions) {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: got %d results for %d executions", len(results), len(intent.WorkflowExecutions))
-	}
-
-	// The workflows may have run past the end of the request: nobody is waiting for a response anymore.
-	if err := ctx.Err(); err != nil {
-		return ChatCompletionResponse{}, err
-	}
-
-	response, err := e.workflowExecutionSynthesizer.Synthesize(ctx, WorkflowExecutionSynthesis{
-		Request:          req,
-		Intent:           intent,
-		ExecutionResults: results,
-	})
-	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: synthesize: %w", err)
-	}
-
-	return response, nil
+	return c.process(ctx, req)
 }

@@ -308,7 +308,7 @@ func TestReasoningEngineReasonStreamsTheAnswer(t *testing.T) {
 		},
 		{
 			name:  "GIVEN the request asks for the usage THEN a last chunk has it",
-			given: proxias.ChatCompletionRequest{Stream: true, StreamOptions: proxias.ChatStreamOptions{IncludeUsage: true}, Messages: userSays("hello").Messages},
+			given: proxias.ChatCompletionRequest{Stream: true, StreamOptions: &proxias.ChatStreamOptions{IncludeUsage: true}, Messages: userSays("hello").Messages},
 			api: sse(start,
 				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
 				`{"type":"message_stop"}`),
@@ -399,6 +399,55 @@ func TestReasoningEngineReasonAsksTheAPIToStreamOnlyWhenTheHarnessDoes(t *testin
 			} else {
 				assert.NotContains(t, *sent, `"stream"`)
 			}
+		})
+	}
+}
+
+func TestReasoningEngineReasonTellsTheModelTheWorkflows(t *testing.T) {
+	tests := []struct {
+		name  string
+		given []proxias.WorkflowDescriptor
+		then  string // the text of the system blocks, after the harness's own
+	}{
+		{
+			name:  "GIVEN workflows THEN the model is told what they are, after the harness's system prompt",
+			given: []proxias.WorkflowDescriptor{restartService, appVersion},
+			then:  "The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service\n- App version: Tells the running version\n",
+		},
+		{
+			name:  "GIVEN no workflow THEN no block is added",
+			given: nil,
+			then:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, sent := mockAnthropic(t, 200, textMessage)
+			engine := anthropic.NewReasoningEngine(client, someModel)
+			req := proxias.ChatCompletionRequest{
+				Messages: []proxias.ChatMessage{
+					{Role: proxias.ChatMessageRoleSystem, Content: text("We run a hosting company")},
+					{Role: proxias.ChatMessageRoleUser, Content: text("what can you do?")},
+				},
+			}
+
+			_, err := engine.Reason(t.Context(), req, tt.given)
+
+			require.NoError(t, err)
+			var call struct {
+				System []struct {
+					Text string `json:"text"`
+				} `json:"system"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(*sent), &call))
+			require.NotEmpty(t, call.System)
+			assert.Equal(t, "We run a hosting company", call.System[0].Text, "the harness's system prompt comes first")
+			if tt.then == "" {
+				assert.Len(t, call.System, 1)
+				return
+			}
+			require.Len(t, call.System, 2)
+			assert.Equal(t, tt.then, call.System[1].Text)
 		})
 	}
 }
