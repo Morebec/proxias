@@ -23,7 +23,7 @@ func NewWorkflowInterceptionMiddleware(classifier IntentClassifier, engine Workf
 		return func(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 			workflowDescs, err := engine.WorkflowDescriptors(ctx, req)
 			if err != nil {
-				return ChatCompletionResponse{}, fmt.Errorf("proxias: list workflow descriptors: %w", err)
+				return ChatCompletionResponse{}, fmt.Errorf("list workflow descriptors: %w", err)
 			}
 
 			// Without workflows there is nothing to choose amongst: no need to ask the classifier.
@@ -31,7 +31,7 @@ func NewWorkflowInterceptionMiddleware(classifier IntentClassifier, engine Workf
 			if len(workflowDescs) != 0 {
 				intent, err = classifier.Classify(ctx, req, workflowDescs)
 				if err != nil {
-					return ChatCompletionResponse{}, fmt.Errorf("proxias: classify intent: %w", err)
+					return ChatCompletionResponse{}, fmt.Errorf("classify intent: %w", err)
 				}
 			}
 
@@ -48,11 +48,11 @@ func NewWorkflowInterceptionMiddleware(classifier IntentClassifier, engine Workf
 func executeAndSynthesize(ctx context.Context, req ChatCompletionRequest, intent Intent, engine WorkflowExecutionEngine, synthesizer WorkflowExecutionSynthesizer) (ChatCompletionResponse, error) {
 	results, err := engine.ExecuteWorkflows(ctx, req, intent.WorkflowExecutions)
 	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("execute workflows: %w", err)
 	}
 
 	if len(results) != len(intent.WorkflowExecutions) {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: got %d results for %d executions", len(results), len(intent.WorkflowExecutions))
+		return ChatCompletionResponse{}, fmt.Errorf("execute workflows: got %d results for %d executions", len(results), len(intent.WorkflowExecutions))
 	}
 
 	// The workflows may have run past the end of the request: nobody is waiting for a response anymore.
@@ -66,7 +66,7 @@ func executeAndSynthesize(ctx context.Context, req ChatCompletionRequest, intent
 		ExecutionResults: results,
 	})
 	if err != nil {
-		return ChatCompletionResponse{}, fmt.Errorf("proxias: synthesize: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("synthesize: %w", err)
 	}
 
 	return response, nil

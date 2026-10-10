@@ -14,6 +14,9 @@ type ControlPlane interface {
 	// workflow that cannot run for a reason the user should hear of is not an error, it is a
 	// WorkflowExecutionResult for the synthesizer.
 	//
+	// An error of a step is wrapped with the proxias: prefix, once, here: the steps' own errors carry only
+	// their stage. A context error is returned as is.
+	//
 	// Process does not recover from panics: the host does, if it wants to.
 	Process(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
 }
@@ -34,7 +37,7 @@ func NewControlPlane(middlewares ...Middleware) (ControlPlane, error) {
 	}
 
 	process := ProcessFunc(func(context.Context, ChatCompletionRequest) (ChatCompletionResponse, error) {
-		return ChatCompletionResponse{}, errors.New("proxias: no middleware answered the request")
+		return ChatCompletionResponse{}, errors.New("no middleware answered the request")
 	})
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		if middlewares[i] == nil {
@@ -51,5 +54,14 @@ func (c *controlPlane) Process(ctx context.Context, req ChatCompletionRequest) (
 	if err := ctx.Err(); err != nil {
 		return ChatCompletionResponse{}, err
 	}
-	return c.process(ctx, req)
+	resp, err := c.process(ctx, req)
+	if err != nil {
+		// The one place that adds the prefix, so that an error never carries it twice. A context error is
+		// returned as is.
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+			return ChatCompletionResponse{}, err
+		}
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: %w", err)
+	}
+	return resp, nil
 }

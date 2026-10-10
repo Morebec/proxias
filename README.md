@@ -162,6 +162,17 @@ A `ControlPlane` is a chain of middleware: the first step that answers a request
 
 A request is passed by value, but its slices and maps are shared with the caller, so a step replaces them rather than editing them (`req.Messages = append([]proxias.ChatMessage{system}, req.Messages...)`). The fields of the request that the model does not name are kept, and written back when the request is forwarded.
 
+### Identity
+
+`proxias.NewUserIdentityMiddleware(provider)` and `proxias.NewAgentIdentityMiddleware(provider)` ask an `IdentityProvider` who a request is from, and put the answer in the context for the rest of the chain, to read with `proxias.UserIdentityFrom(ctx)` and `proxias.AgentIdentityFrom(ctx)`. `NewUserHeaderIdentityProvider(name)` and `NewAgentHeaderIdentityProvider(name)` read the identity from a header of the HTTP request, and trust it: use them behind a gateway that sets or checks the header, never exposed directly to clients. An unknown identity is the empty one; a provider that fails fails the request.
+
+```go
+user, _ := proxias.NewUserIdentityMiddleware(proxias.NewUserHeaderIdentityProvider("X-User-Id"))
+agent, _ := proxias.NewAgentIdentityMiddleware(proxias.NewAgentHeaderIdentityProvider("X-Agent-Id"))
+cp, _ := proxias.NewControlPlane(user, agent, interception, reasoning)
+// further down the chain: proxias.UserIdentityFrom(ctx)
+```
+
 ## Trying it with a real harness
 
 `examples/sandbox` is a sandbox for the chain: it serves a `ControlPlane` as the OpenAI chat completions endpoint, with one workflow, and a stub reasoning engine unless `ANTHROPIC_API_KEY` is set. To try a middleware, change `buildControlPlane` and restart. A real harness talks to it: OpenClaw runs in a Docker container, so nothing else needs installing.

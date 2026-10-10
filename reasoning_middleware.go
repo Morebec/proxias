@@ -17,7 +17,7 @@ func NewReasoningMiddleware(engine ReasoningEngine) (Middleware, error) {
 		return func(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 			response, err := engine.Reason(ctx, req, WorkflowDescriptorsFrom(ctx))
 			if err != nil {
-				return ChatCompletionResponse{}, fmt.Errorf("proxias: reason: %w", err)
+				return ChatCompletionResponse{}, fmt.Errorf("reason: %w", err)
 			}
 			return response, nil
 		}

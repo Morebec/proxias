@@ -2,6 +2,8 @@ package proxias_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -493,3 +495,41 @@ func TestNewControlPlane(t *testing.T) {
 
 // passThrough is a middleware that leaves the request to the rest of the chain.
 func passThrough(next proxias.ProcessFunc) proxias.ProcessFunc { return next }
+
+func TestControlPlaneProcessPrefixesStepErrorsOnce(t *testing.T) {
+	// Given a step that fails with an error of its own
+	cause := errors.New("boom")
+	failing := func(proxias.ProcessFunc) proxias.ProcessFunc {
+		return func(context.Context, proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {
+			return proxias.ChatCompletionResponse{}, fmt.Errorf("stage: %w", cause)
+		}
+	}
+	controlPlane, err := proxias.NewControlPlane(failing)
+	require.NoError(t, err)
+
+	// When a request is processed
+	_, err = controlPlane.Process(t.Context(), someRequest)
+
+	// Then the prefix is added once, and the cause is found
+	assert.EqualError(t, err, "proxias: stage: boom")
+	assert.ErrorIs(t, err, cause)
+}
+
+func TestControlPlaneProcessReturnsAStepsContextErrorAsIs(t *testing.T) {
+	// Given a step that cancels the context and returns its error
+	ctx, cancel := context.WithCancel(t.Context())
+	cancelling := func(proxias.ProcessFunc) proxias.ProcessFunc {
+		return func(ctx context.Context, _ proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {
+			cancel()
+			return proxias.ChatCompletionResponse{}, ctx.Err()
+		}
+	}
+	controlPlane, err := proxias.NewControlPlane(cancelling)
+	require.NoError(t, err)
+
+	// When a request is processed
+	_, err = controlPlane.Process(ctx, someRequest)
+
+	// Then it is the context's error, unwrapped
+	assert.Equal(t, context.Canceled, err)
+}
