@@ -47,9 +47,9 @@ func (i Intent) IsReasoningIntent() bool {
 // unknown workflow with a failed WorkflowExecutionResult.
 type WorkflowExecutionIntent struct {
 	// WorkflowID is the ID of the workflow to run.
-	WorkflowID string
+	WorkflowID string `json:"workflow_id"`
 	// Params are the values of the workflow's parameters, by name, as its InputSchema describes them.
-	Params map[string]any
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // CompositeIntentClassifier is an IntentClassifier made of two stages, so that each can be a different,

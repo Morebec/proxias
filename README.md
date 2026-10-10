@@ -41,7 +41,7 @@ import "github.com/morebec/proxias"
 | `WorkflowExecutionSynthesizer` | **the reply** to a request that ran workflows: makes the response from the intent and the results | usually one LLM call, or templates |
 | `ReasoningEngine` | **the reply** to a request no workflow fits: open-ended reasoning | the LLM, as it would be without Proxias |
 
-`proxias.NewControlPlane(classifier, workflows, synthesizer, reasoner, options...)` wires them into a `ControlPlane`, whose one method is `Process`. It panics if any of the four is nil. `IntentClassifierFunc` and `WorkflowExecutionSynthesizerFunc` make one of a function.
+`proxias.NewControlPlane(classifier, workflows, synthesizer, reasoner, options...)` wires them into a `ControlPlane`, whose one method is `Process`. It returns an error, never panics, if any of the four is nil. `IntentClassifierFunc` and `WorkflowExecutionSynthesizerFunc` make one of a function.
 
 ### Two stages in one classifier
 
@@ -93,14 +93,14 @@ A `CompletionResponse` carries a status, a content type and a body: Proxias neve
 
 ## Quickstart
 
-A runnable version of the wiring, with a toy implementation of each interface, is in [examples/basic](examples/basic): `go run ./examples/basic`.
+A runnable hello world is in [examples/basic](examples/basic): one workflow, with Claude as the classifier and the synthesizer through the [Anthropic adapter](#anthropic-adapter), and a stub as the reasoning engine. It needs `ANTHROPIC_API_KEY`: `go run ./examples/basic`.
 
 ### Embedding in a Server: intercepting HTTP requests
 
 Proxias is not a server: the transport stays the host's. The `openai` package adapts the OpenAI chat completions API: `openai.DecodeRequest` turns a request body into a `proxias.CompletionRequest`, and `openai.Handler` serves a `ControlPlane` over `net/http`. With it, a server answers what its workflows can and forwards the rest to the upstream LLM.
 
 ```go
-controlPlane := proxias.NewControlPlane(
+controlPlane, err := proxias.NewControlPlane(
 	proxias.NewCompositeIntentClassifier(selector, extractor),
 	workflows,
 	proxias.WorkflowExecutionSynthesizerFunc(
@@ -109,6 +109,9 @@ controlPlane := proxias.NewControlPlane(
 		}),
 	reasoner, // forwards the request to the upstream LLM, byte for byte (CompletionRequest.Request)
 )
+if err != nil {
+	return err
+}
 
 mux := http.NewServeMux()
 mux.Handle("POST /v1/chat/completions", openai.Handler(controlPlane))
@@ -121,7 +124,7 @@ The handler answers 400 for a body that is not a chat completions request (413 i
 The agent answers the host application's admin commands, typed or spoken, without an LLM round trip for each.
 
 ```go
-controlPlane := proxias.NewControlPlane(adminCommands, adminWorkflows, adminSynthesizer, assistant)
+controlPlane, err := proxias.NewControlPlane(adminCommands, adminWorkflows, adminSynthesizer, assistant)
 
 response, err := controlPlane.Process(ctx, proxias.CompletionRequest{Messages: []proxias.CompletionMessage{
 	{Role: proxias.CompletionMessageRoleUser, Content: []byte(transcript)}, // from the chat box or speech-to-text
@@ -130,13 +133,27 @@ response, err := controlPlane.Process(ctx, proxias.CompletionRequest{Messages: [
 
 Free-form questions still reach the LLM, through `assistant`, the `ReasoningEngine`.
 
-## Options
+## Anthropic adapter
 
-| Option | Default |
-|---|---|
-| `WithLogger(l)`: the logger of the stages | `slog.Default()` |
+`adapters/anthropic` makes Claude act as the fast, system-1 part of the flow: it reads the conversation and answers with a small JSON object, the intent. No tool is involved. It uses the official [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-go): you build its client, so the key, the timeout, the retries and the base URL are yours, and so is the model.
 
-Options are passed to `NewControlPlane` as `ControlPlaneOption`s.
+```go
+client := anthropicsdk.NewClient(option.WithAPIKey(key), option.WithMaxRetries(0))
+
+// The whole classification in one call.
+classifier := anthropic.NewIntentClassifier(client, anthropicsdk.ModelClaudeHaiku4_5)
+
+// Or the two stages of a CompositeIntentClassifier, each with its own model.
+classifier = proxias.NewCompositeIntentClassifier(
+    anthropic.NewWorkflowExecutionIntentSelector(client, anthropicsdk.ModelClaudeHaiku4_5),
+    anthropic.NewWorkflowExecutionIntentParameterExtractor(client, anthropicsdk.ModelClaudeSonnet4_5),
+)
+
+// The reply, wrapped in the wire format of your clients.
+synthesizer, err := anthropic.NewWorkflowExecutionSynthesizer(client, anthropicsdk.ModelClaudeSonnet4_5, encode) // an error if encode is nil
+```
+
+A failing call returns the SDK's error, wrapped: `errors.As` an `*anthropicsdk.Error` for its status code. An answer that is not the expected JSON is an error too: it is for the host to decide whether to fall back to the `ReasoningEngine`.
 
 ## Performance
 

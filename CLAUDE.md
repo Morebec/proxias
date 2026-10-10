@@ -7,8 +7,7 @@ This file describes the code **as it is**. Anything planned but not built is und
 ## Project rules
 
 - **It is a library.** Every exported identifier is public API, versioned by [Release Please](https://github.com/googleapis/release-please). An exported change is a breaking change: say so in the commit (`feat!:` / `BREAKING CHANGE:`).
-- **Standard library only**, outside the tests. Do not add a dependency for the library itself. The tests use [testify](https://github.com/stretchr/testify) (`assert`, `require`), the only exception.
-- **Knows nothing of any host application**: no application types, config or globals. Transports live in the host; `CompletionRequest.Request` carries the raw request for a host that needs it. `adapters/openai` is the one adapter (OpenAI chat completions: `DecodeRequest` and an `http.Handler`); do not grow it into a server or add other transports.
+- **Knows nothing of any host application**: no application types, config or globals. Transports live in the host; `CompletionRequest.Request` carries the raw request for a host that needs it. `adapters/openai` is the one transport adapter (OpenAI chat completions: `DecodeRequest` and an `http.Handler`); do not grow it into a server or add other transports. `adapters/anthropic` is a model adapter: it implements the components with Claude through the official `anthropic-sdk-go` (the only dependency of the library besides the tests' testify): do not reimplement what the SDK does (HTTP, auth, retries, errors).
 - No `main` at the root, no `init()`, no package-level mutable state: a host may embed several ControlPlanes in one process, and a ControlPlane is used concurrently.
 - **Never log a request**: not its messages, nor the parameters or results of a workflow. (There is no logging yet, see [Not implemented](#not-implemented).)
 
@@ -18,8 +17,9 @@ Follows [golang-standards/project-layout](https://github.com/golang-standards/pr
 
 | Path | What |
 |---|---|
-| `/` (module root) | Package `proxias`, the public API: the library is the root package, importable as `github.com/morebec/proxias`. `classification.go` (`IntentClassifier`, `Intent`, `CompositeIntentClassifier`, its selector and parameter extractor stages), `workflowexecution.go` (`WorkflowExecutionEngine`, `WorkflowExecutionSynthesizer`, descriptors, results), `reasoning.go` (`ReasoningEngine`), `completion.go` (`CompletionRequest`, `CompletionMessage`, `CompletionResponse`), `control_plane.go` (the orchestrator), `control_plane_options.go` (`ControlPlaneOption`), `doc.go`, and the tests. |
+| `/` (module root) | Package `proxias`, the public API: the library is the root package, importable as `github.com/morebec/proxias`. `classification.go` (`IntentClassifier`, `Intent`, `CompositeIntentClassifier`, its selector and parameter extractor stages), `workflowexecution.go` (`WorkflowExecutionEngine`, `WorkflowExecutionSynthesizer`, descriptors, results), `reasoning.go` (`ReasoningEngine`), `completion.go` (`CompletionRequest`, `CompletionMessage`, `CompletionResponse`), `control_plane.go` (the orchestrator), `control_plane_options.go` (`ControlPlaneOption`), `prompt.go` (`Prompt`: builds an LLM prompt from paragraphs, `## ` sections, bullet points and labeled bullet points; nothing in the repo uses it since `adapters/anthropic` moved to constant prompts), `doc.go`, and the tests. |
 | `adapters/openai/` | Package `openai`: wire types, `DecodeRequest`, `Handler`. Depends on the root package, never the reverse. Its package comment is in `openai.go` (no `doc.go`). |
+| `adapters/anthropic/` | Package `anthropic` (package comment in `client.go`): four components built from the host's `anthropic.Client` of the SDK (the host owns the key, timeout, retries, base URL) and a **required model** (`New...(client, model)`; no default). The classification components make Claude a system-1 decision model: a static, cacheable system prompt (a constant per component), a user turn that is the JSON of the conversation (`messages`) and of the workflows (`WorkflowDescriptor`'s JSON; the selector's without schemas), and a JSON answer parsed leniently. **No tool use.** `IntentClassifier` answers `{"executions":[{"workflow_id","params"}]}` (none = reasoning intent), `WorkflowExecutionIntentSelector` `{"workflows":[ids]}`, `WorkflowExecutionIntentParameterExtractor` the executions of the matched workflows; an ID that was not offered is dropped. `WorkflowExecutionSynthesizer` writes text, wrapped by a required `ResponseEncoder`. Errors wrap the SDK's (`errors.As` an `*anthropic.Error`; its text includes the API's message, which can echo the request); an unreadable answer is an error, the host decides on a fallback. No confidence threshold, no streaming. Internals: `claude` in `client.go` (the SDK client and model; `ask`, `askJSON`), `classification.go`, `synthesis.go`. Tests use an `httptest` server (`mock_test.go`). |
 | `examples/basic/` | Runnable example, a `package main`. One directory per example. |
 | `assets/` | Logo. |
 | `.github/workflows/` | `ci.yml`, `pr-title.yml`, `release-please.yml`. |
@@ -56,7 +56,7 @@ One per step, no more:
 | `WorkflowExecutionSynthesizer` | The reply to what ran. |
 | `ReasoningEngine` | The reply when nothing ran. |
 
-Each has a `...Func` adapter except `WorkflowExecutionEngine` (two methods). Parameter extraction is not a fifth interface: it is the second stage of `CompositeIntentClassifier` (`WorkflowExecutionIntentSelector`, then `WorkflowExecutionIntentParameterExtractor`). Dependencies are `NewControlPlane`'s arguments, which **panics if any of the four is nil**. `ControlPlane` is an interface; its implementation is unexported.
+Each has a `...Func` adapter except `WorkflowExecutionEngine` (two methods). Parameter extraction is not a fifth interface: it is the second stage of `CompositeIntentClassifier` (`WorkflowExecutionIntentSelector`, then `WorkflowExecutionIntentParameterExtractor`). Dependencies are `NewControlPlane`'s arguments, which **returns an error if any of the four is nil**: a library does not panic in its constructors. `ControlPlane` is an interface; its implementation is unexported.
 
 ### Flow of `Process(ctx, req)`
 
@@ -77,22 +77,21 @@ Each has a `...Func` adapter except `WorkflowExecutionEngine` (two methods). Par
 
 ### Not implemented
 
-The README, the doc comment of `NewControlPlane`, and earlier versions of this file mention some of these; they are not in the code.
+Earlier versions of this file and of the README mentioned some of these; they are not in the code, and the docs now follow the code.
 
 - **Logging.** There is no `logging.go`, no logger decorators, no `WithLogger`. `ControlPlaneOption` is `func(*controlPlane)` with no option defined, and `NewControlPlane` applies the options before assigning the components. If logging is added: decorators of the four components applied by `NewControlPlane`, configured by `WithLogger`, at Debug level, once a stage is done, never logging an error that is also returned.
-- README's "Options" table (`WithLogger`) and the `NewControlPlane` comment ("decorated with a logger") describe that missing feature, and README has no "When something goes wrong" section.
 - No `/docs`, `/internal`, `/cmd`.
 
 ## Code conventions
 
 - **Conventional Commits** for commits and PR titles (`feat: ...`, `fix(engine): ...`, `chore: ...`). PRs are squash-merged, so the title is the changelog line; CI enforces it. Do not edit `.release-please-manifest.json` or tag by hand.
-- Every exported identifier has a doc comment starting with its name. Each package has a package comment (`doc.go` at the root, `openai.go` in `adapters/openai`).
+- Every exported identifier has a doc comment starting with its name. Each package has a package comment (`doc.go` at the root, `openai.go` in `adapters/openai`, `client.go` in `adapters/anthropic`).
 - Comments say why, not what; match the surrounding density.
 - Keep the ControlPlane's own overhead under a microsecond (README claims about 0.1 µs, no allocation): run `task bench` when touching `control_plane.go`.
 
 ## Testing conventions
 
-- **External tests** (`package proxias_test`, `package openai_test`): they test what a host sees. Table-driven.
+- **External tests** (`package proxias_test`, `package openai_test`, `package anthropic_test`): they test what a host sees. Table-driven.
 - **Naming:** a test is named after the type and the method (`TestCompletionRequestLastMessage`, `TestCompositeIntentClassifierClassify`), then what it asserts when a method needs several tests (`TestControlPlaneProcessReturnsContextErrorBeforeProcessing`). One concern per test function.
 - **Given / when / then.** `given` is what is injected (the dependencies and options), `when` the arguments of the method under test, `then` what is expected. Case names say it: `GIVEN ... WHEN ... THEN ...`, leaving out a clause that does not vary; the plain everything-goes-right case is named `canonical`. A table case has `name`, `given`, `when` (omitted when the arguments never vary), `then`, **one field per line, never one-lined**. A clause with several values is a struct local to the test: `assumptions`, `args`, `expect`. Range with `for _, tt := range tests`. A test that is not a table marks its sections `// Given`, `// When`, `// Then`.
 - Prefer typed assertion funcs where one says more than a value (`then assert.ErrorAssertionFunc`, `then assert.BoolAssertionFunc`).

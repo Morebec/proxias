@@ -32,7 +32,6 @@ type WorkflowExecutionSynthesizer interface {
 // WorkflowExecutionSynthesizerFunc is a WorkflowExecutionSynthesizer as a function.
 type WorkflowExecutionSynthesizerFunc func(context.Context, WorkflowExecutionSynthesis) (CompletionResponse, error)
 
-// Synthesize implements the WorkflowExecutionSynthesizer interface for WorkflowExecutionSynthesizerFunc.
 // Synthesize implements WorkflowExecutionSynthesizer.
 func (f WorkflowExecutionSynthesizerFunc) Synthesize(ctx context.Context, synthesis WorkflowExecutionSynthesis) (CompletionResponse, error) {
 	return f(ctx, synthesis)

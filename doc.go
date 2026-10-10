@@ -9,5 +9,6 @@
 // usually an LLM, as is.
 //
 // Proxias is a library: transports (HTTP, gRPC, CLI) and every application concern live in the host. The
-// openai package adapts the OpenAI chat completions API.
+// openai package adapts the OpenAI chat completions API, and the anthropic package implements the
+// components with Claude.
 package proxias

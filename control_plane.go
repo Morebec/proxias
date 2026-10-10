@@ -2,11 +2,11 @@ package proxias
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-// ControlPlane turns a request into intents of executing workflows or reasoning using an LLM, runs them,
-// and turns the results back into a response.
+// ControlPlane turns a request into a response, either by running workflows or by reasoning.
 // It is the entry point of the SDK: an IntentClassifier names which of the
 // WorkflowExecutionEngine's workflows the request asks for (and with which parameters), the
 // WorkflowExecutionEngine runs them, and the WorkflowExecutionSynthesizer makes the response. A request that
@@ -29,26 +29,23 @@ type controlPlane struct {
 	reasoningEngine              ReasoningEngine
 }
 
-// NewControlPlane makes a ControlPlane. It panics if any of the four components is nil.
-//
-// Each component is decorated with a logger (see WithLogger), so that what the stages do is observable
-// without every implementation having to log.
+// NewControlPlane makes a ControlPlane. It returns an error if any of the four components is nil.
 func NewControlPlane(
 	classifier IntentClassifier,
 	workflowEngine WorkflowExecutionEngine,
 	synthesizer WorkflowExecutionSynthesizer,
 	reasoningEngine ReasoningEngine,
 	options ...ControlPlaneOption,
-) ControlPlane {
+) (ControlPlane, error) {
 	switch {
 	case classifier == nil:
-		panic("proxias: NewControlPlane needs an IntentClassifier")
+		return nil, errors.New("proxias: NewControlPlane needs an IntentClassifier")
 	case workflowEngine == nil:
-		panic("proxias: NewControlPlane needs a WorkflowExecutionEngine")
+		return nil, errors.New("proxias: NewControlPlane needs a WorkflowExecutionEngine")
 	case synthesizer == nil:
-		panic("proxias: NewControlPlane needs a Synthesizer")
+		return nil, errors.New("proxias: NewControlPlane needs a Synthesizer")
 	case reasoningEngine == nil:
-		panic("proxias: NewControlPlane needs a ReasoningEngine")
+		return nil, errors.New("proxias: NewControlPlane needs a ReasoningEngine")
 	}
 
 	e := &controlPlane{}
@@ -61,7 +58,7 @@ func NewControlPlane(
 	e.workflowExecutionSynthesizer = synthesizer
 	e.reasoningEngine = reasoningEngine
 
-	return e
+	return e, nil
 }
 
 // Process implements ControlPlane.

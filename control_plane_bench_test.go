@@ -9,7 +9,7 @@ import (
 
 // BenchmarkControlPlaneProcess measures the ControlPlane's own overhead: the components answer instantly.
 func BenchmarkControlPlaneProcess(b *testing.B) {
-	controlPlane := proxias.NewControlPlane(
+	controlPlane := newControlPlane(b,
 		mockClassifier(proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}}, nil),
 		mockWorkflowExecutionEngine{
 			descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},

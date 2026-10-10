@@ -202,7 +202,7 @@ func TestControlPlaneProcessWorkflowExecutions(t *testing.T) {
 				synthesizer = recordingWorkflowExecutionSynthesizer(&recorded)
 			}
 
-			controlPlane := proxias.NewControlPlane(
+			controlPlane := newControlPlane(t,
 				tt.given.classifier,
 				tt.given.workflowEngine,
 				synthesizer,
@@ -286,7 +286,7 @@ func TestControlPlaneProcessReasons(t *testing.T) {
 				reasoningEngine = recordingReasoningEngine(&recordedReq, &recordedDesc)
 			}
 
-			controlPlane := proxias.NewControlPlane(
+			controlPlane := newControlPlane(t,
 				tt.given.classifier,
 				tt.given.workflowEngine,
 				mockWorkflowExecutionSynthesizer(someResponse, nil),
@@ -312,7 +312,7 @@ func TestControlPlaneProcessReturnsContextErrorBeforeProcessing(t *testing.T) {
 	// GIVEN a context already cancelled
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	controlPlane := proxias.NewControlPlane(
+	controlPlane := newControlPlane(t,
 		mockClassifier(proxias.Intent{}, nil),
 		mockWorkflowExecutionEngine{descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor}},
 		mockWorkflowExecutionSynthesizer(someResponse, nil),
@@ -332,7 +332,7 @@ func TestControlPlaneProcessReturnsContextErrorDuringWorkflowExecution(t *testin
 
 	signalled := make(chan struct{})
 
-	controlPlane := proxias.NewControlPlane(
+	controlPlane := newControlPlane(t,
 		mockClassifier(proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}}, nil),
 		&delayedWorkflowExecutionEngine{
 			descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},
@@ -379,7 +379,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 	}{
 		{
 			name: "GIVEN IntentClassifier panics THEN panic goes through",
-			given: proxias.NewControlPlane(
+			given: newControlPlane(t,
 				proxias.IntentClassifierFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
 					panic(panicValue)
 				}),
@@ -390,7 +390,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 		},
 		{
 			name: "GIVEN WorkflowExecutionEngine panics executing THEN panic goes through",
-			given: proxias.NewControlPlane(
+			given: newControlPlane(t,
 				mockClassifier(proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}}, nil),
 				&panicWorkflowExecutionEngine{panicMsg: panicValue},
 				mockWorkflowExecutionSynthesizer(someResponse, nil),
@@ -399,7 +399,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 		},
 		{
 			name: "GIVEN WorkflowExecutionSynthesizer panics THEN panic goes through",
-			given: proxias.NewControlPlane(
+			given: newControlPlane(t,
 				mockClassifier(proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}}, nil),
 				mockWorkflowExecutionEngine{
 					descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},
@@ -413,7 +413,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 		},
 		{
 			name: "GIVEN ReasoningEngine panics THEN panic goes through",
-			given: proxias.NewControlPlane(
+			given: newControlPlane(t,
 				mockClassifier(proxias.Intent{}, nil),
 				mockWorkflowExecutionEngine{descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor}},
 				mockWorkflowExecutionSynthesizer(someResponse, nil),
@@ -444,6 +444,14 @@ func (e *panicWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias
 	panic(e.panicMsg)
 }
 
+// newControlPlane makes a ControlPlane of components that are all given.
+func newControlPlane(tb testing.TB, classifier proxias.IntentClassifier, engine proxias.WorkflowExecutionEngine, synthesizer proxias.WorkflowExecutionSynthesizer, reasoner proxias.ReasoningEngine) proxias.ControlPlane {
+	tb.Helper()
+	controlPlane, err := proxias.NewControlPlane(classifier, engine, synthesizer, reasoner)
+	require.NoError(tb, err)
+	return controlPlane
+}
+
 func TestNewControlPlane(t *testing.T) {
 	type assumptions struct {
 		classifier              proxias.IntentClassifier
@@ -454,7 +462,7 @@ func TestNewControlPlane(t *testing.T) {
 	tests := []struct {
 		name  string
 		given assumptions
-		then  string // panic message if any
+		then  string // error message if any
 	}{
 		{
 			name: "GIVEN all four components THEN a control plane is created",
@@ -467,7 +475,7 @@ func TestNewControlPlane(t *testing.T) {
 			then: "",
 		},
 		{
-			name: "GIVEN no IntentClassifier THEN it panics",
+			name: "GIVEN no IntentClassifier THEN it fails",
 			given: assumptions{
 				classifier:              nil,
 				workflowExecutionEngine: mockWorkflowExecutionEngine{},
@@ -477,7 +485,7 @@ func TestNewControlPlane(t *testing.T) {
 			then: "IntentClassifier",
 		},
 		{
-			name: "GIVEN no WorkflowExecutionEngine THEN it panics",
+			name: "GIVEN no WorkflowExecutionEngine THEN it fails",
 			given: assumptions{
 				classifier:              mockClassifier(proxias.Intent{}, nil),
 				workflowExecutionEngine: nil,
@@ -487,7 +495,7 @@ func TestNewControlPlane(t *testing.T) {
 			then: "WorkflowExecutionEngine",
 		},
 		{
-			name: "GIVEN no WorkflowExecutionSynthesizer THEN it panics",
+			name: "GIVEN no WorkflowExecutionSynthesizer THEN it fails",
 			given: assumptions{
 				classifier:              mockClassifier(proxias.Intent{}, nil),
 				workflowExecutionEngine: mockWorkflowExecutionEngine{},
@@ -497,7 +505,7 @@ func TestNewControlPlane(t *testing.T) {
 			then: "Synthesizer",
 		},
 		{
-			name: "GIVEN no ReasoningEngine THEN it panics",
+			name: "GIVEN no ReasoningEngine THEN it fails",
 			given: assumptions{
 				classifier:              mockClassifier(proxias.Intent{}, nil),
 				workflowExecutionEngine: mockWorkflowExecutionEngine{},
@@ -509,14 +517,15 @@ func TestNewControlPlane(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			construct := func() {
-				proxias.NewControlPlane(tt.given.classifier, tt.given.workflowExecutionEngine, tt.given.synthesizer, tt.given.reasoningEngine)
-			}
+			controlPlane, err := proxias.NewControlPlane(tt.given.classifier, tt.given.workflowExecutionEngine, tt.given.synthesizer, tt.given.reasoningEngine)
 
 			if tt.then == "" {
-				assert.NotPanics(t, construct)
+				require.NoError(t, err)
+				assert.NotNil(t, controlPlane)
 			} else {
-				assert.Panics(t, construct)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.then)
+				assert.Nil(t, controlPlane)
 			}
 		})
 	}
