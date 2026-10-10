@@ -97,6 +97,7 @@ tasks:
         cat > {{.SANDBOX_HOME}}/openclaw.json <<'JSON'
         {
           "gateway": { "mode": "local" },
+          "tools": { "toolSearch": false },
           "agents": { "defaults": { "model": { "primary": "proxias/proxias-sandbox" } } },
           "models": {
             "mode": "merge",
