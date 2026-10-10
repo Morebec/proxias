@@ -1,6 +1,5 @@
-// Command basic is a hello world of Proxias: a ControlPlane with a single workflow, say_hello_world, whose
-// classifier and synthesizer are Claude (set ANTHROPIC_API_KEY), and a stub of the reasoning engine, which
-// would be the host's LLM.
+// Command basic is a hello world of Proxias: a ControlPlane with a single workflow, say_hello_world, that a
+// request answers without any LLM, and Claude (set ANTHROPIC_API_KEY) for what no workflow fits.
 package main
 
 import (
@@ -10,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -17,18 +17,28 @@ import (
 	"github.com/morebec/proxias/adapters/anthropic"
 )
 
+const sayHelloWorld = "say_hello_world"
+
+// classify is an IntentClassifier of one keyword, where a real one would be a fast, local model.
+func classify(_ context.Context, req proxias.ChatCompletionRequest, _ []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+	if !strings.Contains(strings.ToLower(req.LastMessage().Content.Text()), "hello") {
+		return proxias.Intent{}, nil // a reasoning intent
+	}
+	return proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: sayHelloWorld}}}, nil
+}
+
 // workflows is a WorkflowExecutionEngine of one workflow.
 type workflows struct{}
 
-func (workflows) WorkflowDescriptors(context.Context, proxias.CompletionRequest) ([]proxias.WorkflowDescriptor, error) {
+func (workflows) WorkflowDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.WorkflowDescriptor, error) {
 	return []proxias.WorkflowDescriptor{{
-		ID:          "say_hello_world",
+		ID:          sayHelloWorld,
 		Name:        "Say hello world",
 		Description: "Says hello to the world",
 	}}, nil
 }
 
-func (workflows) ExecuteWorkflows(_ context.Context, _ proxias.CompletionRequest, executions []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
+func (workflows) ExecuteWorkflows(_ context.Context, _ proxias.ChatCompletionRequest, executions []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
 	results := make([]proxias.WorkflowExecutionResult, 0, len(executions))
 	for _, execution := range executions {
 		results = append(results, proxias.WorkflowExecutionResult{
@@ -40,18 +50,22 @@ func (workflows) ExecuteWorkflows(_ context.Context, _ proxias.CompletionRequest
 	return results, nil
 }
 
-// encode wraps the text that Claude wrote in the wire format of the clients: here, plain text.
-func encode(_ proxias.CompletionRequest, s string) proxias.CompletionResponse {
-	return text(s)
-}
-
-// reason is a ReasoningEngine that stands in for the LLM that answers what no workflow fits.
-func reason(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
-	return text("(an LLM would answer)"), nil
-}
-
-func text(s string) proxias.CompletionResponse {
-	return proxias.CompletionResponse{Status: 200, ContentType: "text/plain", Body: io.NopCloser(strings.NewReader(s))}
+// synthesize is a WorkflowExecutionSynthesizer that says what the workflow answered, where a real one would
+// make a single LLM call.
+func synthesize(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
+	return proxias.NewChatCompletionResponse(proxias.ChatCompletion{
+		ID:      "hello",
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   "proxias",
+		Choices: []proxias.ChatCompletionChoice{{
+			Message: proxias.ChatMessage{
+				Role:    proxias.ChatMessageRoleAssistant,
+				Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: fmt.Sprint(synthesis.ExecutionResults[0].Data["message"])}},
+			},
+			FinishReason: proxias.ChatFinishReasonStop,
+		}},
+	})
 }
 
 func main() {
@@ -66,27 +80,23 @@ func run(out io.Writer) error {
 		return errors.New("set ANTHROPIC_API_KEY to run this example")
 	}
 
-	// The client reads ANTHROPIC_API_KEY. The key, the timeout and the retries are the host's to set.
-	client := anthropicsdk.NewClient()
-
-	synthesizer, err := anthropic.NewWorkflowExecutionSynthesizer(client, anthropicsdk.ModelClaudeHaiku4_5, encode)
-	if err != nil {
-		return err
-	}
-
 	controlPlane, err := proxias.NewControlPlane(
-		anthropic.NewIntentClassifier(client, anthropicsdk.ModelClaudeHaiku4_5),
+		proxias.IntentClassifierFunc(classify),
 		workflows{},
-		synthesizer,
-		proxias.ReasoningEngineFunc(reason),
+		proxias.WorkflowExecutionSynthesizerFunc(synthesize),
+		// The client reads ANTHROPIC_API_KEY. The key, the timeout and the retries are the host's to set.
+		anthropic.NewReasoningEngine(anthropicsdk.NewClient(), anthropicsdk.ModelClaudeHaiku4_5),
 	)
 	if err != nil {
 		return err
 	}
 
 	for _, message := range []string{"Say hello to the world", "Write me a haiku"} {
-		response, err := controlPlane.Process(context.Background(), proxias.CompletionRequest{
-			Messages: []proxias.CompletionMessage{{Role: proxias.CompletionMessageRoleUser, Content: []byte(message)}},
+		response, err := controlPlane.Process(context.Background(), proxias.ChatCompletionRequest{
+			Messages: []proxias.ChatMessage{{
+				Role:    proxias.ChatMessageRoleUser,
+				Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: message}},
+			}},
 		})
 		if err != nil {
 			return fmt.Errorf("%q: %w", message, err)

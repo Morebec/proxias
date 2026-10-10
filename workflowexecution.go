@@ -13,27 +13,27 @@ import "context"
 // required parameters, and a workflow ID that the engine does not know.
 type WorkflowExecutionEngine interface {
 	// WorkflowDescriptors describes the workflows that this engine provides.
-	// Implementations may narrow that list based on the specifics of the CompletionRequest.
-	WorkflowDescriptors(context.Context, CompletionRequest) ([]WorkflowDescriptor, error)
+	// Implementations may narrow that list based on the specifics of the ChatCompletionRequest.
+	WorkflowDescriptors(context.Context, ChatCompletionRequest) ([]WorkflowDescriptor, error)
 
 	// ExecuteWorkflows runs the workflows, and returns exactly one result per workflow execution.
-	ExecuteWorkflows(context.Context, CompletionRequest, []WorkflowExecutionIntent) ([]WorkflowExecutionResult, error)
+	ExecuteWorkflows(context.Context, ChatCompletionRequest, []WorkflowExecutionIntent) ([]WorkflowExecutionResult, error)
 }
 
 // WorkflowExecutionSynthesizer translates raw execution results into human-readable responses.
 // It serves as the outbound translation layer in Proxias, transforming structured execution results
-// into human-readable prose or UI specs as a CompletionResponse.
+// into human-readable prose or UI specs as a ChatCompletionResponse.
 //
-// Error Handling: return a non-nil error if synthesis itself fails to generate a CompletionResponse.
+// Error Handling: return a non-nil error if synthesis itself fails to generate a ChatCompletionResponse.
 type WorkflowExecutionSynthesizer interface {
-	Synthesize(context.Context, WorkflowExecutionSynthesis) (CompletionResponse, error)
+	Synthesize(context.Context, WorkflowExecutionSynthesis) (ChatCompletionResponse, error)
 }
 
 // WorkflowExecutionSynthesizerFunc is a WorkflowExecutionSynthesizer as a function.
-type WorkflowExecutionSynthesizerFunc func(context.Context, WorkflowExecutionSynthesis) (CompletionResponse, error)
+type WorkflowExecutionSynthesizerFunc func(context.Context, WorkflowExecutionSynthesis) (ChatCompletionResponse, error)
 
 // Synthesize implements WorkflowExecutionSynthesizer.
-func (f WorkflowExecutionSynthesizerFunc) Synthesize(ctx context.Context, synthesis WorkflowExecutionSynthesis) (CompletionResponse, error) {
+func (f WorkflowExecutionSynthesizerFunc) Synthesize(ctx context.Context, synthesis WorkflowExecutionSynthesis) (ChatCompletionResponse, error) {
 	return f(ctx, synthesis)
 }
 
@@ -71,7 +71,7 @@ type WorkflowExecutionResult struct {
 
 // WorkflowExecutionSynthesis is what a WorkflowExecutionSynthesizer makes a response of.
 type WorkflowExecutionSynthesis struct {
-	Request          CompletionRequest         `json:"request,omitzero"`
+	Request          ChatCompletionRequest     `json:"request,omitzero"`
 	Intent           Intent                    `json:"intent,omitzero"`
 	ExecutionResults []WorkflowExecutionResult `json:"execution_results,omitempty"`
 }

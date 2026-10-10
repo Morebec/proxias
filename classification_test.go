@@ -10,13 +10,13 @@ import (
 )
 
 func mockWorkflowSelector(returnedDescriptors []proxias.WorkflowDescriptor, err error) proxias.WorkflowExecutionIntentSelector {
-	return proxias.WorkflowExecutionIntentSelectorFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowDescriptor, error) {
+	return proxias.WorkflowExecutionIntentSelectorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowDescriptor, error) {
 		return returnedDescriptors, err
 	})
 }
 
 func mockParamExtractor(executions []proxias.WorkflowExecutionIntent, err error) proxias.WorkflowExecutionIntentParameterExtractor {
-	return proxias.WorkflowExecutionIntentParameterExtractorFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowExecutionIntent, error) {
+	return proxias.WorkflowExecutionIntentParameterExtractorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowExecutionIntent, error) {
 		return executions, err
 	})
 }
@@ -74,7 +74,7 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			classifier := proxias.NewCompositeIntentClassifier(tt.given.selector, tt.given.extractor)
 
-			got, err := classifier.Classify(t.Context(), proxias.CompletionRequest{Model: "m"}, []proxias.WorkflowDescriptor{
+			got, err := classifier.Classify(t.Context(), proxias.ChatCompletionRequest{Model: "m"}, []proxias.WorkflowDescriptor{
 				someWorkflowDescriptor,
 				someOtherWorkflowDescriptor,
 			})
@@ -87,7 +87,7 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 
 func TestIntentClassifierFuncClassify(t *testing.T) {
 	expectedCtx := t.Context()
-	expectedReq := proxias.CompletionRequest{Model: "some_model"}
+	expectedReq := proxias.ChatCompletionRequest{Model: "some_model"}
 	expectedDescriptors := []proxias.WorkflowDescriptor{
 		{Name: "SomeWorkflow"},
 	}
@@ -99,7 +99,7 @@ func TestIntentClassifierFuncClassify(t *testing.T) {
 	expectedErr := assert.AnError
 
 	classifier := proxias.IntentClassifierFunc(
-		func(ctx context.Context, req proxias.CompletionRequest, descriptors []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+		func(ctx context.Context, req proxias.ChatCompletionRequest, descriptors []proxias.WorkflowDescriptor) (proxias.Intent, error) {
 			assert.Equal(t, expectedCtx, ctx)
 			assert.Equal(t, expectedReq, req)
 			assert.Equal(t, expectedDescriptors, descriptors)

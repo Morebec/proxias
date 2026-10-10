@@ -13,12 +13,12 @@ import (
 func TestWorkflowExecutionSynthesizerFuncSynthesize(t *testing.T) {
 	var synthesized proxias.WorkflowExecutionSynthesis
 	var synthesizer proxias.WorkflowExecutionSynthesizer = proxias.WorkflowExecutionSynthesizerFunc(
-		func(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
+		func(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 			synthesized = synthesis
 			return someResponse, nil
 		})
 	synthesis := proxias.WorkflowExecutionSynthesis{
-		Request:          proxias.CompletionRequest{Model: "m"},
+		Request:          proxias.ChatCompletionRequest{Model: "m"},
 		Intent:           proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}},
 		ExecutionResults: []proxias.WorkflowExecutionResult{{WorkflowID: "some_workflow", Status: "completed"}},
 	}
@@ -32,8 +32,8 @@ func TestWorkflowExecutionSynthesizerFuncSynthesize(t *testing.T) {
 
 func TestWorkflowExecutionSynthesizerFuncSynthesizeReturnsTheFunctionsError(t *testing.T) {
 	var synthesizer proxias.WorkflowExecutionSynthesizer = proxias.WorkflowExecutionSynthesizerFunc(
-		func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
-			return proxias.CompletionResponse{}, assert.AnError
+		func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
+			return proxias.ChatCompletionResponse{}, assert.AnError
 		})
 
 	got, err := synthesizer.Synthesize(context.Background(), proxias.WorkflowExecutionSynthesis{})

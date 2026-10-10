@@ -15,13 +15,13 @@ func TestReasoningEngineFunc(t *testing.T) {
 		{Name: "SomeWorkflow"},
 	}
 	expectedContext := t.Context()
-	expectedReq := proxias.CompletionRequest{Model: "some_model"}
+	expectedReq := proxias.ChatCompletionRequest{Model: "some_model"}
 	expectedErr := assert.AnError
-	expectedResponse := proxias.CompletionResponse{
+	expectedResponse := proxias.ChatCompletionResponse{
 		Status: 10,
 	}
 
-	reasoningEngine := proxias.ReasoningEngineFunc(func(ctx context.Context, req proxias.CompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
+	reasoningEngine := proxias.ReasoningEngineFunc(func(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 		assert.Equal(t, expectedContext, ctx)
 		assert.Equal(t, expectedReq, req)
 		assert.Equal(t, expectedDescs, descs)

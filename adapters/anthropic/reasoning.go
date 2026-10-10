@@ -7,56 +7,67 @@ package anthropic
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/morebec/proxias"
 )
 
-const defaultMaxTokens = 4096
-
-// ReasoningEngine is a proxias.ReasoningEngine that has Claude answer the conversation as it is. It answers
-// as the OpenAI chat completions API does, the transport of the openai package.
+// ReasoningEngine is a proxias.ReasoningEngine that has Claude answer the conversation as it is. The
+// request and the answer are those of the OpenAI chat completions API, which Claude's Messages API is mapped
+// to and from: text, images, tool calls and results, cache breakpoints, and streaming.
 type ReasoningEngine struct {
-	client anthropicsdk.Client
-	model  anthropicsdk.Model
+	claudeHelper
+	MaxTokens int
+}
+
+type ReasoningEngineOption func(*ReasoningEngine)
+
+// WithMaxTokens sets the maximum number of tokens for the ReasoningEngine.
+func WithMaxTokens(maxTokens int) ReasoningEngineOption {
+	return func(e *ReasoningEngine) {
+		e.MaxTokens = maxTokens
+	}
 }
 
 // NewReasoningEngine makes a ReasoningEngine that asks model through client.
-func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model) *ReasoningEngine {
-	return &ReasoningEngine{client: client, model: model}
+func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model, opts ...ReasoningEngineOption) *ReasoningEngine {
+	e := &ReasoningEngine{claudeHelper: claudeHelper{client, model}}
+	for _, o := range opts {
+		o(e)
+	}
+
+	return e
 }
 
-// Reason implements proxias.ReasoningEngine. System and developer messages are Claude's system prompt, user
-// and assistant messages its conversation; messages with other roles, or without content, are left out.
-// The workflow descriptors are not used.
+// Reason implements proxias.ReasoningEngine. The workflow descriptors are not used.
 //
-// The answer is a chat completion. req.Stream is ignored: the answer is never streamed.
-func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.CompletionRequest, descriptors []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
-	params := anthropicsdk.MessageNewParams{Model: e.model, MaxTokens: defaultMaxTokens}
-
-	for _, m := range req.Messages {
-		content := string(m.Content)
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-
-		switch m.Role {
-		case proxias.CompletionMessageRoleSystem, proxias.CompletionMessageRoleDeveloper:
-			params.System = append(params.System, anthropicsdk.TextBlockParam{Text: content})
-		case proxias.CompletionMessageRoleUser:
-			params.Messages = append(params.Messages, anthropicsdk.NewUserMessage(anthropicsdk.NewTextBlock(content)))
-		case proxias.CompletionMessageRoleAssistant:
-			params.Messages = append(params.Messages, anthropicsdk.NewAssistantMessage(anthropicsdk.NewTextBlock(content)))
-		}
-	}
-
-	response, err := e.client.Messages.New(ctx, params)
+// The answer is streamed if req.Stream is set. An error of the API is returned, wrapped, even for a stream:
+// the first event is read before the response is.
+func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, _ []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+	params, err := mapChatCompletionRequestToMessageParams(req, e.model)
 	if err != nil {
-		return proxias.CompletionResponse{}, fmt.Errorf("anthropic: %w", err)
+		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: map the request: %w", err)
 	}
 
-	return mapAnthropicMessageToCompletionResponse(response)
+	if !req.Stream {
+		message, err := e.client.Messages.New(ctx, params)
+		if err != nil {
+			return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
+		}
+		return proxias.NewChatCompletionResponse(mapChatCompletion(message))
+	}
+
+	stream := e.client.Messages.NewStreaming(ctx, params)
+	if !stream.Next() {
+		err := stream.Err()
+		_ = stream.Close()
+		if err == nil {
+			err = errors.New("the API answered nothing")
+		}
+		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
+	}
+	return proxias.NewChatCompletionStream(mapChunks(stream, req.StreamOptions.IncludeUsage)), nil
 }

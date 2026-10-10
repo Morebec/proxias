@@ -15,14 +15,14 @@ import "context"
 // Error Handling: return a non-nil error if classification itself fails, these errors are internal infrastructure level errors
 // and won't be synthesized into a user-facing response by the control plane.
 type IntentClassifier interface {
-	Classify(context.Context, CompletionRequest, []WorkflowDescriptor) (Intent, error)
+	Classify(context.Context, ChatCompletionRequest, []WorkflowDescriptor) (Intent, error)
 }
 
 // IntentClassifierFunc is an IntentClassifier as a function.
-type IntentClassifierFunc func(context.Context, CompletionRequest, []WorkflowDescriptor) (Intent, error)
+type IntentClassifierFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) (Intent, error)
 
 // Classify calls f.
-func (f IntentClassifierFunc) Classify(ctx context.Context, req CompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
+func (f IntentClassifierFunc) Classify(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
 	return f(ctx, req, descs)
 }
 
@@ -71,7 +71,7 @@ func NewCompositeIntentClassifier(selector WorkflowExecutionIntentSelector, para
 
 // Classify selects the workflows the request asks for, then extracts their parameters. Nothing is extracted
 // if no workflow was selected: the intent is then a reasoning intent.
-func (c CompositeIntentClassifier) Classify(ctx context.Context, req CompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
+func (c CompositeIntentClassifier) Classify(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
 	matchedWorkflowDescs, err := c.selector.Select(ctx, req, descs)
 	if err != nil {
 		return Intent{}, err
@@ -99,14 +99,14 @@ func (c CompositeIntentClassifier) Classify(ctx context.Context, req CompletionR
 // Error Handling: return a non-nil error if workflow selection itself fails, these are internal infrastructure level errors
 // and won't be synthesized into a user-facing response by the control plane.
 type WorkflowExecutionIntentSelector interface {
-	Select(context.Context, CompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
+	Select(context.Context, ChatCompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
 }
 
 // WorkflowExecutionIntentSelectorFunc is a WorkflowExecutionIntentSelector as a function.
-type WorkflowExecutionIntentSelectorFunc func(context.Context, CompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
+type WorkflowExecutionIntentSelectorFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
 
 // Select implements WorkflowExecutionIntentSelector.
-func (f WorkflowExecutionIntentSelectorFunc) Select(ctx context.Context, req CompletionRequest, descs []WorkflowDescriptor) ([]WorkflowDescriptor, error) {
+func (f WorkflowExecutionIntentSelectorFunc) Select(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) ([]WorkflowDescriptor, error) {
 	return f(ctx, req, descs)
 }
 
@@ -119,13 +119,13 @@ func (f WorkflowExecutionIntentSelectorFunc) Select(ctx context.Context, req Com
 // Error Handling: return a non-nil error if parameter extraction itself fails, these are internal infrastructure level errors
 // and won't be synthesized into a user-facing response by the control plane.
 type WorkflowExecutionIntentParameterExtractor interface {
-	ExtractParameters(ctx context.Context, req CompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
+	ExtractParameters(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
 }
 
 // WorkflowExecutionIntentParameterExtractorFunc is a WorkflowExecutionIntentParameterExtractor as a function.
-type WorkflowExecutionIntentParameterExtractorFunc func(ctx context.Context, req CompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
+type WorkflowExecutionIntentParameterExtractorFunc func(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
 
 // ExtractParameters implements WorkflowExecutionIntentParameterExtractor.
-func (f WorkflowExecutionIntentParameterExtractorFunc) ExtractParameters(ctx context.Context, req CompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error) {
+func (f WorkflowExecutionIntentParameterExtractorFunc) ExtractParameters(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error) {
 	return f(ctx, req, matchedDescs)
 }

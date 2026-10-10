@@ -17,7 +17,7 @@ type ControlPlane interface {
 	// WorkflowExecutionResult for the synthesizer.
 	//
 	// Process does not recover from panics: the host does, if it wants to.
-	Process(ctx context.Context, req CompletionRequest) (CompletionResponse, error)
+	Process(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
 }
 
 // controlPlane is the ControlPlane made by NewControlPlane. It is safe for concurrent use as long as the
@@ -62,14 +62,14 @@ func NewControlPlane(
 }
 
 // Process implements ControlPlane.
-func (e *controlPlane) Process(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+func (e *controlPlane) Process(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return CompletionResponse{}, err
+		return ChatCompletionResponse{}, err
 	}
 
 	workflowDescs, err := e.workflowExecutionEngine.WorkflowDescriptors(ctx, req)
 	if err != nil {
-		return CompletionResponse{}, fmt.Errorf("proxias: list workflow descriptors: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: list workflow descriptors: %w", err)
 	}
 
 	// Without workflows there is nothing to choose amongst: no need to ask the classifier.
@@ -78,7 +78,7 @@ func (e *controlPlane) Process(ctx context.Context, req CompletionRequest) (Comp
 	if len(workflowDescs) != 0 {
 		intent, err = e.intentClassifier.Classify(ctx, req, workflowDescs)
 		if err != nil {
-			return CompletionResponse{}, fmt.Errorf("proxias: classify intent: %w", err)
+			return ChatCompletionResponse{}, fmt.Errorf("proxias: classify intent: %w", err)
 		}
 	}
 
@@ -89,28 +89,36 @@ func (e *controlPlane) Process(ctx context.Context, req CompletionRequest) (Comp
 	return e.processWorkflowExecutionIntent(ctx, req, intent)
 }
 
-func (e *controlPlane) processOpenEndedReasoningIntent(ctx context.Context, req CompletionRequest, workflowDescs []WorkflowDescriptor) (CompletionResponse, error) {
+func (e *controlPlane) processOpenEndedReasoningIntent(
+	ctx context.Context,
+	req ChatCompletionRequest,
+	workflowDescs []WorkflowDescriptor,
+) (ChatCompletionResponse, error) {
 	response, err := e.reasoningEngine.Reason(ctx, req, workflowDescs)
 	if err != nil {
-		return CompletionResponse{}, fmt.Errorf("proxias: reason: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: reason: %w", err)
 	}
 
 	return response, nil
 }
 
-func (e *controlPlane) processWorkflowExecutionIntent(ctx context.Context, req CompletionRequest, intent Intent) (CompletionResponse, error) {
+func (e *controlPlane) processWorkflowExecutionIntent(
+	ctx context.Context,
+	req ChatCompletionRequest,
+	intent Intent,
+) (ChatCompletionResponse, error) {
 	results, err := e.workflowExecutionEngine.ExecuteWorkflows(ctx, req, intent.WorkflowExecutions)
 	if err != nil {
-		return CompletionResponse{}, fmt.Errorf("proxias: execute workflows: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: %w", err)
 	}
 
 	if len(results) != len(intent.WorkflowExecutions) {
-		return CompletionResponse{}, fmt.Errorf("proxias: execute workflows: got %d results for %d executions", len(results), len(intent.WorkflowExecutions))
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: execute workflows: got %d results for %d executions", len(results), len(intent.WorkflowExecutions))
 	}
 
 	// The workflows may have run past the end of the request: nobody is waiting for a response anymore.
 	if err := ctx.Err(); err != nil {
-		return CompletionResponse{}, err
+		return ChatCompletionResponse{}, err
 	}
 
 	response, err := e.workflowExecutionSynthesizer.Synthesize(ctx, WorkflowExecutionSynthesis{
@@ -119,7 +127,7 @@ func (e *controlPlane) processWorkflowExecutionIntent(ctx context.Context, req C
 		ExecutionResults: results,
 	})
 	if err != nil {
-		return CompletionResponse{}, fmt.Errorf("proxias: synthesize: %w", err)
+		return ChatCompletionResponse{}, fmt.Errorf("proxias: synthesize: %w", err)
 	}
 
 	return response, nil

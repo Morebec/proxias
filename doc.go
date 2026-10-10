@@ -8,7 +8,7 @@
 // response, usually in a single LLM pass. A request that asks for no workflow goes to the ReasoningEngine,
 // usually an LLM, as is.
 //
-// Proxias is a library: transports (HTTP, gRPC, CLI) and every application concern live in the host. The
-// openai package adapts the OpenAI chat completions API, and the anthropic package implements the
-// components with Claude.
+// Proxias is a library: transports (gRPC, CLI...) and every application concern live in the host. The
+// model of Proxias is the OpenAI chat completions API, which NewChatCompletionHandler serves over net/http, and
+// the anthropic package implements the components with Claude.
 package proxias

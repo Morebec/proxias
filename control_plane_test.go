@@ -17,44 +17,44 @@ type mockWorkflowExecutionEngine struct {
 	executeErr        error
 }
 
-func (e mockWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.CompletionRequest) ([]proxias.WorkflowDescriptor, error) {
+func (e mockWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.WorkflowDescriptor, error) {
 	return e.descriptorResults, e.describeErr
 }
 
-func (e mockWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias.CompletionRequest, []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
+func (e mockWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
 	return e.executionResults, e.executeErr
 }
 
-var someRequest = proxias.CompletionRequest{Model: "m"}
-var someResponse = proxias.CompletionResponse{Status: 200}
+var someRequest = proxias.ChatCompletionRequest{Model: "m"}
+var someResponse = proxias.ChatCompletionResponse{Status: 200}
 
 func mockClassifier(intent proxias.Intent, err error) proxias.IntentClassifier {
-	return proxias.IntentClassifierFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+	return proxias.IntentClassifierFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
 		return intent, err
 	})
 }
 
-func mockWorkflowExecutionSynthesizer(resp proxias.CompletionResponse, err error) proxias.WorkflowExecutionSynthesizer {
-	return proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
+func mockWorkflowExecutionSynthesizer(resp proxias.ChatCompletionResponse, err error) proxias.WorkflowExecutionSynthesizer {
+	return proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 		return resp, err
 	})
 }
 
-func mockReasoningEngine(resp proxias.CompletionResponse, err error) proxias.ReasoningEngine {
-	return proxias.ReasoningEngineFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
+func mockReasoningEngine(resp proxias.ChatCompletionResponse, err error) proxias.ReasoningEngine {
+	return proxias.ReasoningEngineFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 		return resp, err
 	})
 }
 
 func recordingWorkflowExecutionSynthesizer(recorded *proxias.WorkflowExecutionSynthesis) proxias.WorkflowExecutionSynthesizer {
-	return proxias.WorkflowExecutionSynthesizerFunc(func(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
+	return proxias.WorkflowExecutionSynthesizerFunc(func(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 		*recorded = synthesis
 		return someResponse, nil
 	})
 }
 
-func recordingReasoningEngine(recordedReq *proxias.CompletionRequest, recordedDesc *[]proxias.WorkflowDescriptor) proxias.ReasoningEngine {
-	return proxias.ReasoningEngineFunc(func(_ context.Context, req proxias.CompletionRequest, desc []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
+func recordingReasoningEngine(recordedReq *proxias.ChatCompletionRequest, recordedDesc *[]proxias.WorkflowDescriptor) proxias.ReasoningEngine {
+	return proxias.ReasoningEngineFunc(func(_ context.Context, req proxias.ChatCompletionRequest, desc []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 		*recordedReq = req
 		*recordedDesc = desc
 		return someResponse, nil
@@ -171,7 +171,7 @@ func TestControlPlaneProcessWorkflowExecutions(t *testing.T) {
 					descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},
 					executionResults:  []proxias.WorkflowExecutionResult{{WorkflowID: "some_workflow", Status: "completed"}},
 				},
-				synthesizer: mockWorkflowExecutionSynthesizer(proxias.CompletionResponse{}, assert.AnError),
+				synthesizer: mockWorkflowExecutionSynthesizer(proxias.ChatCompletionResponse{}, assert.AnError),
 			},
 			then: expect{
 				errContains: "synthesize",
@@ -269,7 +269,7 @@ func TestControlPlaneProcessReasons(t *testing.T) {
 				workflowEngine: mockWorkflowExecutionEngine{
 					descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},
 				},
-				reasoningEngine: mockReasoningEngine(proxias.CompletionResponse{}, assert.AnError),
+				reasoningEngine: mockReasoningEngine(proxias.ChatCompletionResponse{}, assert.AnError),
 			},
 			then: expect{
 				errContains: "reason",
@@ -278,7 +278,7 @@ func TestControlPlaneProcessReasons(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var recordedReq proxias.CompletionRequest
+			var recordedReq proxias.ChatCompletionRequest
 			var recordedDesc []proxias.WorkflowDescriptor
 
 			reasoningEngine := tt.given.reasoningEngine
@@ -339,7 +339,7 @@ func TestControlPlaneProcessReturnsContextErrorDuringWorkflowExecution(t *testin
 			results:           []proxias.WorkflowExecutionResult{{WorkflowID: "some_workflow"}},
 			signal:            signalled,
 		},
-		proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
+		proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 			panic("should not synthesize after cancel")
 		}),
 		mockReasoningEngine(someResponse, nil),
@@ -360,11 +360,11 @@ type delayedWorkflowExecutionEngine struct {
 	signal            chan struct{}
 }
 
-func (e *delayedWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.CompletionRequest) ([]proxias.WorkflowDescriptor, error) {
+func (e *delayedWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.WorkflowDescriptor, error) {
 	return e.descriptorResults, nil
 }
 
-func (e *delayedWorkflowExecutionEngine) ExecuteWorkflows(ctx context.Context, _ proxias.CompletionRequest, _ []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
+func (e *delayedWorkflowExecutionEngine) ExecuteWorkflows(ctx context.Context, _ proxias.ChatCompletionRequest, _ []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
 	e.signal <- struct{}{}
 	<-ctx.Done()
 	return nil, ctx.Err()
@@ -380,7 +380,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 		{
 			name: "GIVEN IntentClassifier panics THEN panic goes through",
 			given: newControlPlane(t,
-				proxias.IntentClassifierFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+				proxias.IntentClassifierFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
 					panic(panicValue)
 				}),
 				mockWorkflowExecutionEngine{descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor}},
@@ -405,7 +405,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 					descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor},
 					executionResults:  []proxias.WorkflowExecutionResult{{WorkflowID: "some_workflow"}},
 				},
-				proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.CompletionResponse, error) {
+				proxias.WorkflowExecutionSynthesizerFunc(func(context.Context, proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
 					panic(panicValue)
 				}),
 				mockReasoningEngine(someResponse, nil),
@@ -417,7 +417,7 @@ func TestControlPlaneProcessDoesNotRecoverPanics(t *testing.T) {
 				mockClassifier(proxias.Intent{}, nil),
 				mockWorkflowExecutionEngine{descriptorResults: []proxias.WorkflowDescriptor{someWorkflowDescriptor}},
 				mockWorkflowExecutionSynthesizer(someResponse, nil),
-				proxias.ReasoningEngineFunc(func(context.Context, proxias.CompletionRequest, []proxias.WorkflowDescriptor) (proxias.CompletionResponse, error) {
+				proxias.ReasoningEngineFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 					panic(panicValue)
 				}),
 			),
@@ -436,11 +436,11 @@ type panicWorkflowExecutionEngine struct {
 	panicMsg string
 }
 
-func (e *panicWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.CompletionRequest) ([]proxias.WorkflowDescriptor, error) {
+func (e *panicWorkflowExecutionEngine) WorkflowDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.WorkflowDescriptor, error) {
 	return []proxias.WorkflowDescriptor{someWorkflowDescriptor}, nil
 }
 
-func (e *panicWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias.CompletionRequest, []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
+func (e *panicWorkflowExecutionEngine) ExecuteWorkflows(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
 	panic(e.panicMsg)
 }
 
