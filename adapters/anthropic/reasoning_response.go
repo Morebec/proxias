@@ -98,8 +98,10 @@ func mapChunks(stream *ssestream.Stream[anthropicsdk.MessageStreamEventUnion], i
 				if event.ContentBlock.Type == "tool_use" {
 					index := len(toolCalls)
 					toolCalls[event.Index] = index
-					call := proxias.ChatCompletionToolCallDelta{Index: index, ID: event.ContentBlock.ID, Type: "function"}
-					call.Function.Name = event.ContentBlock.Name
+					call := proxias.ChatCompletionToolCallDelta{
+						Index: index, ID: event.ContentBlock.ID, Type: "function",
+						Function: proxias.ChatCompletionFunctionCallDelta{Name: event.ContentBlock.Name},
+					}
 					err = chunk(proxias.ChatCompletionDelta{ToolCalls: []proxias.ChatCompletionToolCallDelta{call}}, nil)
 				}
 
@@ -109,8 +111,10 @@ func mapChunks(stream *ssestream.Stream[anthropicsdk.MessageStreamEventUnion], i
 					err = chunk(proxias.ChatCompletionDelta{Content: event.Delta.Text}, nil)
 				case "input_json_delta":
 					if index, ok := toolCalls[event.Index]; ok && event.Delta.PartialJSON != "" {
-						call := proxias.ChatCompletionToolCallDelta{Index: index}
-						call.Function.Arguments = event.Delta.PartialJSON
+						call := proxias.ChatCompletionToolCallDelta{
+							Index:    index,
+							Function: proxias.ChatCompletionFunctionCallDelta{Arguments: event.Delta.PartialJSON},
+						}
 						err = chunk(proxias.ChatCompletionDelta{ToolCalls: []proxias.ChatCompletionToolCallDelta{call}}, nil)
 					}
 				}

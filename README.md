@@ -89,7 +89,7 @@ ChatCompletionRequest
 
 A step can change the request before it passes it on, for instance to route the model, and it can add to the context. See [Middleware](#middleware).
 
-The model of Proxias is the OpenAI chat completions API: a `ChatCompletionRequest` is its request (messages with text and image parts, tool calls and results, tools, cache breakpoints, `stream`), and a `ChatCompletionResponse` is an HTTP response (a status, headers and a body) in its format. A reasoning engine can forward the upstream's response untouched, a stream included; a workflow's reply is made with `NewChatCompletionResponse` or `NewChatCompletionStream`. An adapter for another provider maps to and from this model at its edge.
+The model of Proxias is the OpenAI chat completions API: a `ChatCompletionRequest` is its request (messages with text and image parts, tool calls and results, tools, cache breakpoints, `stream`), and a `ChatCompletionResponse` is an HTTP response (a status, headers and a body) in its format. A reasoning engine can forward the upstream's response untouched, a stream included; a workflow's reply is a `ChatCompletion` (`NewChatCompletionBuilder(req).BuildText(...)` or `.BuildToolCalls(...)`) given to `NewChatCompletionResponse(req, completion)`, which streams it if the request asked for a stream. `NewChatCompletionStream` is for chunks produced over time, as a provider streams them. An adapter for another provider maps to and from this model at its edge.
 
 
 ## Quickstart
@@ -154,6 +154,8 @@ A failing call returns the SDK's error, wrapped: `errors.As` an `*anthropicsdk.E
 
 ## Middleware
 
+The reference for every component, with examples, is in [docs/](docs/README.md).
+
 A `ControlPlane` is a chain of middleware: the first step that answers a request bypasses the rest. `proxias.Middleware` is a function that receives the rest of the chain as `next` and returns its own step. A step can:
 
 - **answer**, as the reasoning middleware does (it is always the last step);
@@ -164,18 +166,17 @@ A request is passed by value, but its slices and maps are shared with the caller
 
 ### Identity
 
-`proxias.NewUserIdentityMiddleware(provider)` and `proxias.NewAgentIdentityMiddleware(provider)` ask an `IdentityProvider` who a request is from, and put the answer in the context for the rest of the chain, to read with `proxias.UserIdentityFrom(ctx)` and `proxias.AgentIdentityFrom(ctx)`. `NewUserHeaderIdentityProvider(name)` and `NewAgentHeaderIdentityProvider(name)` read the identity from a header of the HTTP request, and trust it: use them behind a gateway that sets or checks the header, never exposed directly to clients. An unknown identity is the empty one; a provider that fails fails the request.
+`proxias.NewUserIdentityMiddleware(provider)` and `proxias.NewAgentIdentityMiddleware(provider)` ask an `IdentityProvider` who a request is from, and put the answer in the context for the rest of the chain, to read with `proxias.UserIdentityFrom(ctx)` and `proxias.AgentIdentityFrom(ctx)`. Providers read a header (`NewUserHeaderIdentityProvider`, `NewAgentHeaderIdentityProvider`, which trust it: use them behind a gateway; an empty name means the OpenAI header, `OpenAI-Organization` or `User-Agent`), or whatever a function says (`IdentityProviderFunc`); `NewIdentityMiddleware[T]` carries an identity struct of your own. See [docs/identity.md](docs/identity.md).
 
 ```go
 user, _ := proxias.NewUserIdentityMiddleware(proxias.NewUserHeaderIdentityProvider("X-User-Id"))
-agent, _ := proxias.NewAgentIdentityMiddleware(proxias.NewAgentHeaderIdentityProvider("X-Agent-Id"))
-cp, _ := proxias.NewControlPlane(user, agent, interception, reasoning)
+cp, _ := proxias.NewControlPlane(user, interception, reasoning)
 // further down the chain: proxias.UserIdentityFrom(ctx)
 ```
 
 ## Trying it with a real harness
 
-`examples/sandbox` is a sandbox for the chain: it serves a `ControlPlane` as the OpenAI chat completions endpoint, with one workflow, and a stub reasoning engine unless `ANTHROPIC_API_KEY` is set. To try a middleware, change `buildControlPlane` and restart. A real harness talks to it: OpenClaw runs in a Docker container, so nothing else needs installing.
+`examples/sandbox` is a sandbox for the chain: it serves a `ControlPlane` as the OpenAI chat completions endpoint, with one workflow. Claude is the classifier, the synthesizer and the reasoning engine, so it needs `ANTHROPIC_API_KEY` in the environment (the name is the `anthropicAPIKeyEnv` constant of the file). To try a middleware, change `buildControlPlane` and restart. A real harness talks to it: OpenClaw runs in a Docker container, so nothing else needs installing.
 
 ```sh
 task sandbox                                 # the sandbox, on :8787 (SANDBOX_PORT=... to change it)

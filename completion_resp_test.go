@@ -1,12 +1,9 @@
 package proxias_test
 
 import (
-	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,93 +12,101 @@ import (
 )
 
 func TestNewChatCompletionResponse(t *testing.T) {
-	// Given
-	completion := proxias.ChatCompletion{
-		ID: "c1", Object: "chat.completion", Model: "m",
+	text := proxias.ChatCompletion{
+		ID: "c1", Model: "m",
 		Choices: []proxias.ChatCompletionChoice{{
 			Message:      proxias.ChatMessage{Role: proxias.ChatMessageRoleAssistant, Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: "hi"}}},
 			FinishReason: proxias.ChatFinishReasonStop,
 		}},
 	}
-
-	// When
-	got, err := proxias.NewChatCompletionResponse(completion)
-
-	// Then
-	require.NoError(t, err)
-	defer func() { _ = got.Body.Close() }()
-	assert.Equal(t, http.StatusOK, got.Status)
-	assert.Equal(t, "application/json", got.Header.Get("Content-Type"))
-	raw, err := io.ReadAll(got.Body)
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"id":"c1","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`, string(raw))
-}
-
-func TestNewChatCompletionStream(t *testing.T) {
-	// Given
-	stop := proxias.ChatFinishReasonStop
-	produce := func(emit func(proxias.ChatCompletionChunk) error) error {
-		for _, chunk := range []proxias.ChatCompletionChunk{
-			{ID: "c1", Choices: []proxias.ChatCompletionChunkChoice{{Delta: proxias.ChatCompletionDelta{Role: "assistant", Content: "hi"}}}},
-			{ID: "c1", Choices: []proxias.ChatCompletionChunkChoice{{FinishReason: &stop}}},
-		} {
-			if err := emit(chunk); err != nil {
-				return err
-			}
-		}
-		return nil
+	withUsage := text
+	withUsage.Usage = &proxias.ChatUsage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}
+	toolCall := proxias.ChatCompletion{
+		ID: "c1", Model: "m",
+		Choices: []proxias.ChatCompletionChoice{{
+			Message:      proxias.ChatMessage{Role: proxias.ChatMessageRoleAssistant, ToolCalls: []proxias.ChatToolCall{{ID: "call1", Type: "function", Function: proxias.ChatFunctionCall{Name: "ask_user", Arguments: "{}"}}}},
+			FinishReason: proxias.ChatFinishReasonToolCalls,
+		}},
 	}
 
-	// When
-	got := proxias.NewChatCompletionStream(produce)
+	type args struct {
+		req        proxias.ChatCompletionRequest
+		completion proxias.ChatCompletion
+	}
+	type expect struct {
+		contentType string
+		body        string
+	}
+	tests := []struct {
+		name string
+		when args
+		then expect
+	}{
+		{
+			name: "canonical",
+			when: args{
+				req:        proxias.ChatCompletionRequest{},
+				completion: text,
+			},
+			then: expect{
+				contentType: "application/json",
+				body:        `{"id":"c1","object":"","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`,
+			},
+		},
+		{
+			name: "WHEN the request streams THEN the completion is streamed",
+			when: args{
+				req:        proxias.ChatCompletionRequest{Stream: true},
+				completion: text,
+			},
+			then: expect{
+				contentType: "text/event-stream",
+				body: `data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}` + "\n\n" +
+					`data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+					"data: [DONE]\n\n",
+			},
+		},
+		{
+			name: "WHEN the request streams and asks for the usage THEN the usage comes last",
+			when: args{
+				req:        proxias.ChatCompletionRequest{Stream: true, StreamOptions: &proxias.ChatStreamOptions{IncludeUsage: true}},
+				completion: withUsage,
+			},
+			then: expect{
+				contentType: "text/event-stream",
+				body: `data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}` + "\n\n" +
+					`data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+					`data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}` + "\n\n" +
+					"data: [DONE]\n\n",
+			},
+		},
+		{
+			name: "WHEN the request streams a tool call THEN the call is streamed",
+			when: args{
+				req:        proxias.ChatCompletionRequest{Stream: true},
+				completion: toolCall,
+			},
+			then: expect{
+				contentType: "text/event-stream",
+				body: `data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call1","type":"function","function":{"name":"ask_user","arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n" +
+					`data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
+					"data: [DONE]\n\n",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// When
+			got, err := proxias.NewChatCompletionResponse(tt.when.req, tt.when.completion)
 
-	// Then
-	defer func() { _ = got.Body.Close() }()
-	assert.Equal(t, http.StatusOK, got.Status)
-	assert.Equal(t, "text/event-stream", got.Header.Get("Content-Type"))
-	raw, err := io.ReadAll(got.Body)
-	require.NoError(t, err)
-	events := strings.Split(strings.TrimSpace(string(raw)), "\n\n")
-	require.Len(t, events, 3)
-	assert.Equal(t, `data: {"id":"c1","object":"","created":0,"model":"","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`, events[0])
-	assert.Contains(t, events[1], `"delta":{},"finish_reason":"stop"`)
-	assert.Equal(t, "data: [DONE]", events[2])
-}
-
-func TestNewChatCompletionStreamFailsWhenTheProducerFails(t *testing.T) {
-	// Given
-	broken := errors.New("the provider went away")
-
-	// When
-	got := proxias.NewChatCompletionStream(func(func(proxias.ChatCompletionChunk) error) error { return broken })
-
-	// Then
-	defer func() { _ = got.Body.Close() }()
-	raw, err := io.ReadAll(got.Body)
-	assert.ErrorIs(t, err, broken)
-	assert.NotContains(t, string(raw), "[DONE]")
-}
-
-func TestNewChatCompletionStreamStopsTheProducerWhenTheBodyIsClosed(t *testing.T) {
-	// Given
-	stopped := make(chan error, 1)
-	got := proxias.NewChatCompletionStream(func(emit func(proxias.ChatCompletionChunk) error) error {
-		for {
-			if err := emit(proxias.ChatCompletionChunk{}); err != nil {
-				stopped <- err
-				return err
-			}
-		}
-	})
-
-	// When the client goes away
-	require.NoError(t, got.Body.Close())
-
-	// Then
-	select {
-	case err := <-stopped:
-		assert.Error(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("the producer was not stopped")
+			// Then
+			require.NoError(t, err)
+			defer func() { _ = got.Body.Close() }()
+			assert.Equal(t, http.StatusOK, got.Status)
+			assert.Equal(t, tt.then.contentType, got.Header.Get("Content-Type"))
+			raw, err := io.ReadAll(got.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.then.body, string(raw))
+		})
 	}
 }

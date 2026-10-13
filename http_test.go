@@ -16,6 +16,17 @@ import (
 	"github.com/morebec/proxias"
 )
 
+// completionRequestBody is a chat completion request the handler accepts.
+const completionRequestBody = `{"model":"m","messages":[{"role":"user","content":"restart the api"}]}`
+
+// chunks is a Reader that returns one chunk per Read, as a stream does.
+type chunks []string
+
+type controlPlaneFunc func(context.Context, proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error)
+
+// zeroes is a Reader of n zero bytes.
+type zeroes int
+
 // failingReader is a body that cannot be read, as a connection that drops mid-request is.
 type failingReader struct{}
 
@@ -224,9 +235,6 @@ type spyBody struct {
 
 func (b *spyBody) Close() error { b.closed = true; return nil }
 
-// chunks is a Reader that returns one chunk per Read, as a stream does.
-type chunks []string
-
 func (c *chunks) Read(p []byte) (int, error) {
 	if len(*c) == 0 {
 		return 0, io.EOF
@@ -321,14 +329,9 @@ func TestWriteChatCompletionResponseClosesTheBodyAndFlushesAsItReads(t *testing.
 	assert.True(t, stream.closed, "the body was closed")
 }
 
-type controlPlaneFunc func(context.Context, proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error)
-
 func (f controlPlaneFunc) Process(ctx context.Context, req proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {
 	return f(ctx, req)
 }
-
-// zeroes is a Reader of n zero bytes.
-type zeroes int
 
 func (z *zeroes) Read(p []byte) (int, error) {
 	if *z <= 0 {
@@ -339,9 +342,6 @@ func (z *zeroes) Read(p []byte) (int, error) {
 	*z -= zeroes(n)
 	return n, nil
 }
-
-// completionRequestBody is a chat completion request the handler accepts.
-const completionRequestBody = `{"model":"m","messages":[{"role":"user","content":"restart the api"}]}`
 
 // unaskedControlPlane panics if it is asked: it is how a request that must not be processed says so.
 var unaskedControlPlane = controlPlaneFunc(func(context.Context, proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {

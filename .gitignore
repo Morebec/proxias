@@ -22,3 +22,6 @@ vendor/
 
 # The sandbox's state (task sandbox:openclaw)
 .sandbox/
+
+# The sandbox's secrets (task sandbox reads it)
+.env

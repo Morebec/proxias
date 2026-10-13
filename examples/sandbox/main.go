@@ -2,15 +2,18 @@
 // endpoint, so that a real harness (OpenClaw, see `task sandbox:openclaw`) can talk to it. To try a middleware,
 // change buildControlPlane and restart `task sandbox`.
 //
-// The workflow is say_hello_world. Without ANTHROPIC_API_KEY, the requests that no workflow fits are answered by
-// a stub that lists the workflows, which shows what the reasoning engine is given.
+// Claude is the classifier, the synthesizer and the reasoning engine, and the workflow is say_hello_world. The
+// sandbox needs ANTHROPIC_API_KEY, from the environment or from a .env file in the working directory (see
+// .env.example): the environment wins over the file.
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,12 +21,24 @@ import (
 	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/adapters/anthropic"
 )
 
+// anthropicAPIKeyEnv is the environment variable that holds the Anthropic API key of the sandbox.
+const anthropicAPIKeyEnv = "ANTHROPIC_API_KEY"
+
+// confirmRestartCallID identifies the call of ask_user that confirmRestart makes, so that its answer is recognised.
+// A harness may rewrite the IDs of its calls, so the ID has only letters and digits, and its answer is matched by
+// prefix: OpenClaw sends back a suffixed copy of it.
+const confirmRestartCallID = "proxiasconfirmrestart"
+
 func main() {
+	if err := loadDotEnv(".env"); err != nil {
+		log.Fatal(err)
+	}
 	controlPlane, err := buildControlPlane()
 	if err != nil {
 		log.Fatal(err)
@@ -46,21 +61,61 @@ func main() {
 // buildControlPlane is the chain to try. Middleware run in order, and the first one that answers a request
 // bypasses the rest: put a new middleware in the list where it should see the requests.
 func buildControlPlane() (proxias.ControlPlane, error) {
-	interception, err := proxias.NewWorkflowInterceptionMiddleware(
-		proxias.IntentClassifierFunc(classify),
-		workflowEngine{},
-		proxias.WorkflowExecutionSynthesizerFunc(synthesize),
-	)
+	key := os.Getenv(anthropicAPIKeyEnv)
+	if key == "" {
+		return nil, fmt.Errorf("%s is not set: export it, or put it in a .env file", anthropicAPIKeyEnv)
+	}
+	client := anthropicsdk.NewClient(option.WithAPIKey(key))
+
+	classifier := anthropic.NewIntentClassifier(client, anthropicsdk.ModelClaudeHaiku4_5)
+	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, anthropicsdk.ModelClaudeHaiku4_5)
+	workflowEngine := workflowEngine{}
+
+	interception, err := proxias.NewWorkflowInterceptionMiddleware(classifier, workflowEngine, synthesizer)
 	if err != nil {
 		return nil, err
 	}
 
-	reasoning, err := proxias.NewReasoningMiddleware(reasoner())
+	reasoningEngine := anthropic.NewReasoningEngine(client, anthropicsdk.ModelClaudeHaiku4_5)
+	reasoning, err := proxias.NewReasoningMiddleware(reasoningEngine)
 	if err != nil {
 		return nil, err
 	}
 
 	return proxias.NewControlPlane(logRequests(), confirmRestart(), interception, reasoning)
+}
+
+// loadDotEnv sets the variables of a .env file that are not already in the environment, so that a variable
+// exported in the shell overrides the file. A missing file is not an error.
+func loadDotEnv(path string) error {
+	file, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			return fmt.Errorf("%s: %q is not NAME=value", path, line)
+		}
+		name = strings.TrimSpace(name)
+		if _, set := os.LookupEnv(name); set {
+			continue
+		}
+		if err := os.Setenv(name, strings.Trim(strings.TrimSpace(value), `"'`)); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
 }
 
 // logRequests logs what each request costs and how it ends: never its messages, which are data.
@@ -73,18 +128,6 @@ func logRequests() proxias.Middleware {
 			return response, err
 		}
 	}
-}
-
-// classify is a keyword IntentClassifier: a request that says hello asks for the say_hello_world workflow. A harness
-// adds messages of its own, such as its context, after the message of the user: so the last two messages of the user
-// are checked, not only the last one.
-func classify(_ context.Context, req proxias.ChatCompletionRequest, _ []proxias.WorkflowDescriptor) (proxias.Intent, error) {
-	for _, text := range recentUserTexts(req) {
-		if strings.Contains(strings.ToLower(text), "hello") {
-			return proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: "say_hello_world"}}}, nil
-		}
-	}
-	return proxias.Intent{}, nil
 }
 
 // workflowEngine is the WorkflowExecutionEngine of the sandbox: one workflow.
@@ -100,59 +143,6 @@ func (workflowEngine) ExecuteWorkflows(_ context.Context, _ proxias.ChatCompleti
 		results = append(results, proxias.WorkflowExecutionResult{WorkflowID: execution.WorkflowID, Status: "completed", Data: map[string]any{"message": "Hello, World!"}})
 	}
 	return results, nil
-}
-
-// synthesize replies with what the workflow answered, where a real one would make a single LLM call.
-func synthesize(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
-	if len(synthesis.ExecutionResults) == 0 {
-		return proxias.ChatCompletionResponse{}, errors.New("no result to synthesize")
-	}
-	return reply(synthesis.Request, fmt.Sprint(synthesis.ExecutionResults[0].Data["message"]))
-}
-
-// reasoner is the reasoning engine: Claude when ANTHROPIC_API_KEY is set, otherwise a stub that lists the
-// workflows it is given.
-func reasoner() proxias.ReasoningEngine {
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		return anthropic.NewReasoningEngine(anthropicsdk.NewClient(), anthropicsdk.ModelClaudeHaiku4_5)
-	}
-	return proxias.ReasoningEngineFunc(func(_ context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
-		names := make([]string, 0, len(descs))
-		for _, d := range descs {
-			names = append(names, d.Name)
-		}
-		return reply(req, "(stub, no LLM) I can: "+strings.Join(names, ", "))
-	})
-}
-
-// reply answers req with text, as a chat completion, or as a stream of one if the harness asked for a stream.
-func reply(req proxias.ChatCompletionRequest, text string) (proxias.ChatCompletionResponse, error) {
-	const id = "proxias-sandbox"
-	created := time.Now().Unix()
-	if !req.Stream {
-		return proxias.NewChatCompletionResponse(proxias.ChatCompletion{
-			ID: id, Object: "chat.completion", Created: created, Model: req.Model,
-			Choices: []proxias.ChatCompletionChoice{{
-				Message:      proxias.ChatMessage{Role: proxias.ChatMessageRoleAssistant, Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: text}}},
-				FinishReason: proxias.ChatFinishReasonStop,
-			}},
-		})
-	}
-
-	stop := proxias.ChatFinishReasonStop
-	return proxias.NewChatCompletionStream(func(emit func(proxias.ChatCompletionChunk) error) error {
-		chunk := func(delta proxias.ChatCompletionDelta, finish *proxias.ChatFinishReason) proxias.ChatCompletionChunk {
-			return proxias.ChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: req.Model,
-				Choices: []proxias.ChatCompletionChunkChoice{{Delta: delta, FinishReason: finish}}}
-		}
-		if err := emit(chunk(proxias.ChatCompletionDelta{Role: proxias.ChatMessageRoleAssistant}, nil)); err != nil {
-			return err
-		}
-		if err := emit(chunk(proxias.ChatCompletionDelta{Content: text}, nil)); err != nil {
-			return err
-		}
-		return emit(chunk(proxias.ChatCompletionDelta{}, &stop))
-	}), nil
 }
 
 // recentUserTexts are the texts of the last two messages of the user.
@@ -173,7 +163,7 @@ func confirmRestart() proxias.Middleware {
 	return func(next proxias.ProcessFunc) proxias.ProcessFunc {
 		return func(ctx context.Context, req proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {
 			if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == proxias.ChatMessageRoleTool && strings.HasPrefix(req.Messages[n-1].ToolCallID, confirmRestartCallID) {
-				return reply(req, restartAnswer(req.Messages[n-1].Content.Text()))
+				return proxias.NewChatCompletionResponse(req, proxias.NewChatCompletionBuilder(req).BuildText(restartAnswer(req.Messages[n-1].Content.Text())))
 			}
 			if !hasTool(req, "ask_user") || !wantsRestart(req) {
 				return next(ctx, req)
@@ -222,53 +212,9 @@ func restartAnswer(result string) string {
 	return "The restart was declined, so nothing was restarted."
 }
 
-// confirmRestartCallID identifies the call of ask_user that confirmRestart makes, so that its answer is recognised.
-// A harness may rewrite the IDs of its calls, so the ID has only letters and digits, and its answer is matched by
-// prefix: OpenClaw sends back a suffixed copy of it.
-const confirmRestartCallID = "proxiasconfirmrestart"
-
 // askUser answers with a call of the ask_user tool, asking the user to confirm the restart.
 func askUser(req proxias.ChatCompletionRequest) (proxias.ChatCompletionResponse, error) {
 	arguments := `{"questions":[{"id":"confirm_restart","header":"Restart","question":"Restart the api service now?","options":[{"label":"Yes, restart (Recommended)","description":"Restart the api service"},{"label":"No","description":"Leave it running"}]}]}`
 	call := proxias.ChatToolCall{ID: confirmRestartCallID, Type: "function", Function: proxias.ChatFunctionCall{Name: "ask_user", Arguments: arguments}}
-	return replyWithToolCall(req, call)
-}
-
-// replyWithToolCall answers req with a call of a tool, as a chat completion or as a stream of one.
-func replyWithToolCall(req proxias.ChatCompletionRequest, call proxias.ChatToolCall) (proxias.ChatCompletionResponse, error) {
-	const id = "proxias-sandbox"
-	created := time.Now().Unix()
-	finish := proxias.ChatFinishReasonToolCalls
-	if !req.Stream {
-		return proxias.NewChatCompletionResponse(proxias.ChatCompletion{
-			ID: id, Object: "chat.completion", Created: created, Model: req.Model,
-			Choices: []proxias.ChatCompletionChoice{{
-				Message:      proxias.ChatMessage{Role: proxias.ChatMessageRoleAssistant, ToolCalls: []proxias.ChatToolCall{call}},
-				FinishReason: finish,
-			}},
-		})
-	}
-
-	return proxias.NewChatCompletionStream(func(emit func(proxias.ChatCompletionChunk) error) error {
-		chunk := func(delta proxias.ChatCompletionDelta, reason *proxias.ChatFinishReason) proxias.ChatCompletionChunk {
-			return proxias.ChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: req.Model,
-				Choices: []proxias.ChatCompletionChunkChoice{{Delta: delta, FinishReason: reason}}}
-		}
-		var start proxias.ChatCompletionToolCallDelta
-		start.Index, start.ID, start.Type = 0, call.ID, call.Type
-		start.Function.Name = call.Function.Name
-		var args proxias.ChatCompletionToolCallDelta
-		args.Function.Arguments = call.Function.Arguments
-		for _, c := range []proxias.ChatCompletionChunk{
-			chunk(proxias.ChatCompletionDelta{Role: proxias.ChatMessageRoleAssistant}, nil),
-			chunk(proxias.ChatCompletionDelta{ToolCalls: []proxias.ChatCompletionToolCallDelta{start}}, nil),
-			chunk(proxias.ChatCompletionDelta{ToolCalls: []proxias.ChatCompletionToolCallDelta{args}}, nil),
-			chunk(proxias.ChatCompletionDelta{}, &finish),
-		} {
-			if err := emit(c); err != nil {
-				return err
-			}
-		}
-		return nil
-	}), nil
+	return proxias.NewChatCompletionResponse(req, proxias.NewChatCompletionBuilder(req).BuildToolCalls(call))
 }

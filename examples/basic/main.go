@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -53,19 +52,8 @@ func (workflows) ExecuteWorkflows(_ context.Context, _ proxias.ChatCompletionReq
 // synthesize is a WorkflowExecutionSynthesizer that says what the workflow answered, where a real one would
 // make a single LLM call.
 func synthesize(_ context.Context, synthesis proxias.WorkflowExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
-	return proxias.NewChatCompletionResponse(proxias.ChatCompletion{
-		ID:      "hello",
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   "proxias",
-		Choices: []proxias.ChatCompletionChoice{{
-			Message: proxias.ChatMessage{
-				Role:    proxias.ChatMessageRoleAssistant,
-				Content: proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: fmt.Sprint(synthesis.ExecutionResults[0].Data["message"])}},
-			},
-			FinishReason: proxias.ChatFinishReasonStop,
-		}},
-	})
+	text := fmt.Sprint(synthesis.ExecutionResults[0].Data["message"])
+	return proxias.NewChatCompletionResponse(synthesis.Request, proxias.NewChatCompletionBuilder(synthesis.Request).BuildText(text))
 }
 
 func main() {

@@ -2,6 +2,15 @@ package proxias
 
 import "context"
 
+// IntentClassifierFunc is an IntentClassifier as a function.
+type IntentClassifierFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) (Intent, error)
+
+// WorkflowExecutionIntentSelectorFunc is a WorkflowExecutionIntentSelector as a function.
+type WorkflowExecutionIntentSelectorFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
+
+// WorkflowExecutionIntentParameterExtractorFunc is a WorkflowExecutionIntentParameterExtractor as a function.
+type WorkflowExecutionIntentParameterExtractorFunc func(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
+
 // IntentClassifier translates an inbound chat completion request into a typed Intent.
 // It serves as the primary inbound translation component evaluating human prose against specific workflow descriptors
 // to determine the request requires code execution through workflows or open-ended reasoning.
@@ -17,9 +26,6 @@ import "context"
 type IntentClassifier interface {
 	Classify(context.Context, ChatCompletionRequest, []WorkflowDescriptor) (Intent, error)
 }
-
-// IntentClassifierFunc is an IntentClassifier as a function.
-type IntentClassifierFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) (Intent, error)
 
 // Classify calls f.
 func (f IntentClassifierFunc) Classify(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
@@ -102,9 +108,6 @@ type WorkflowExecutionIntentSelector interface {
 	Select(context.Context, ChatCompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
 }
 
-// WorkflowExecutionIntentSelectorFunc is a WorkflowExecutionIntentSelector as a function.
-type WorkflowExecutionIntentSelectorFunc func(context.Context, ChatCompletionRequest, []WorkflowDescriptor) ([]WorkflowDescriptor, error)
-
 // Select implements WorkflowExecutionIntentSelector.
 func (f WorkflowExecutionIntentSelectorFunc) Select(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) ([]WorkflowDescriptor, error) {
 	return f(ctx, req, descs)
@@ -121,9 +124,6 @@ func (f WorkflowExecutionIntentSelectorFunc) Select(ctx context.Context, req Cha
 type WorkflowExecutionIntentParameterExtractor interface {
 	ExtractParameters(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
 }
-
-// WorkflowExecutionIntentParameterExtractorFunc is a WorkflowExecutionIntentParameterExtractor as a function.
-type WorkflowExecutionIntentParameterExtractorFunc func(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error)
 
 // ExtractParameters implements WorkflowExecutionIntentParameterExtractor.
 func (f WorkflowExecutionIntentParameterExtractorFunc) ExtractParameters(ctx context.Context, req ChatCompletionRequest, matchedDescs []WorkflowDescriptor) ([]WorkflowExecutionIntent, error) {

@@ -2,6 +2,14 @@ package proxias
 
 import "strings"
 
+const (
+	promptParagraph promptBlockKind = iota
+	promptSection
+	promptBulletPoint
+)
+
+type promptBlockKind int
+
 // Prompt builds the text of a prompt for an LLM from paragraphs, titled sections and bullet points, so that
 // the components that talk to a model do not assemble strings by hand. The text is plain Markdown: a section
 // is a "## " heading, a bullet point a "- " line.
@@ -13,14 +21,6 @@ import "strings"
 type Prompt struct {
 	blocks []promptBlock
 }
-
-type promptBlockKind int
-
-const (
-	promptParagraph promptBlockKind = iota
-	promptSection
-	promptBulletPoint
-)
 
 type promptBlock struct {
 	kind promptBlockKind

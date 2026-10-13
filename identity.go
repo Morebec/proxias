@@ -6,6 +6,16 @@ import (
 	"fmt"
 )
 
+// DefaultUserIdentityHeader and DefaultAgentIdentityHeader are the headers that NewUserHeaderIdentityProvider
+// and NewAgentHeaderIdentityProvider read when given no name: the headers that OpenAI clients send. OpenAI has
+// no header for an end user, so the user default is the organization that the client is billed to, which is
+// the tenant a proxy usually sees; the agent default is the User-Agent that the OpenAI SDKs and the harnesses
+// built on them set to name themselves (for instance "OpenAI/Python 1.40.0").
+const (
+	DefaultUserIdentityHeader  = "OpenAI-Organization"
+	DefaultAgentIdentityHeader = "User-Agent"
+)
+
 // UserIdentity identifies the user on whose behalf a request is made, as a host defines it (an ID, an email).
 // The empty identity means the user is unknown.
 type UserIdentity string
@@ -14,6 +24,16 @@ type UserIdentity string
 // The empty identity means the agent is unknown.
 type AgentIdentity string
 
+// IdentityProviderFunc is an IdentityProvider of a function, for an identity that comes from anywhere: a token,
+// a session, a database.
+type IdentityProviderFunc[T any] func(ctx context.Context, req ChatCompletionRequest) (T, error)
+
+// UserIdentityProvider provides the identity of the user of a request.
+type UserIdentityProvider IdentityProvider[UserIdentity]
+
+// AgentIdentityProvider provides the identity of the agent that made a request.
+type AgentIdentityProvider IdentityProvider[AgentIdentity]
+
 // IdentityProvider tells who a request is from. It is generic so that the same shape serves the user and the
 // agent, see UserIdentityProvider and AgentIdentityProvider. An error means the identity could not be
 // determined, and fails the request; an unknown identity is the zero value of T, not an error.
@@ -21,20 +41,10 @@ type IdentityProvider[T any] interface {
 	ProvideIdentity(ctx context.Context, req ChatCompletionRequest) (T, error)
 }
 
-// IdentityProviderFunc is an IdentityProvider of a function, for an identity that comes from anywhere: a token,
-// a session, a database.
-type IdentityProviderFunc[T any] func(ctx context.Context, req ChatCompletionRequest) (T, error)
-
 // ProvideIdentity calls f.
 func (f IdentityProviderFunc[T]) ProvideIdentity(ctx context.Context, req ChatCompletionRequest) (T, error) {
 	return f(ctx, req)
 }
-
-// UserIdentityProvider provides the identity of the user of a request.
-type UserIdentityProvider IdentityProvider[UserIdentity]
-
-// AgentIdentityProvider provides the identity of the agent that made a request.
-type AgentIdentityProvider IdentityProvider[AgentIdentity]
 
 // HeaderIdentityProvider provides an identity from a header of the HTTP request that carried the request. It
 // trusts the header: it is for a host that sits behind something that sets it (a gateway) or that checked it
@@ -50,16 +60,6 @@ func NewHeaderIdentityProvider[T ~string](headerName string) *HeaderIdentityProv
 		HeaderName: headerName,
 	}
 }
-
-// DefaultUserIdentityHeader and DefaultAgentIdentityHeader are the headers that NewUserHeaderIdentityProvider
-// and NewAgentHeaderIdentityProvider read when given no name: the headers that OpenAI clients send. OpenAI has
-// no header for an end user, so the user default is the organization that the client is billed to, which is
-// the tenant a proxy usually sees; the agent default is the User-Agent that the OpenAI SDKs and the harnesses
-// built on them set to name themselves (for instance "OpenAI/Python 1.40.0").
-const (
-	DefaultUserIdentityHeader  = "OpenAI-Organization"
-	DefaultAgentIdentityHeader = "User-Agent"
-)
 
 // NewUserHeaderIdentityProvider returns a HeaderIdentityProvider of UserIdentity that reads the given header,
 // or DefaultUserIdentityHeader if headerName is empty.

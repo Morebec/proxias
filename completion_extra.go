@@ -10,11 +10,14 @@ import (
 // not drop what it does not understand, so each request-side type keeps the other fields of its JSON object in
 // Extra, and writes them back when it is marshalled. The typed fields are the source of truth: a middleware that
 // changes them changes what is sent, and the extra fields never override a typed one.
+//
+// The methods of each type convert it to a local type named fields: the same fields, without the methods, so that
+// encoding it does not call the method again.
 
-// unmarshalPlain reads data into plain, a pointer to a type without these methods, and returns the fields of
-// data that plain does not name.
-func unmarshalPlain(data []byte, plain any) (map[string]json.RawMessage, error) {
-	if err := json.Unmarshal(data, plain); err != nil {
+// unmarshalWithExtra reads data into v, a pointer to a fields type, and returns the extra fields: those of data
+// that v does not name.
+func unmarshalWithExtra(data []byte, v any) (map[string]json.RawMessage, error) {
+	if err := json.Unmarshal(data, v); err != nil {
 		return nil, err
 	}
 
@@ -23,7 +26,7 @@ func unmarshalPlain(data []byte, plain any) (map[string]json.RawMessage, error) 
 		return nil, err
 	}
 
-	named := jsonNames(reflect.TypeOf(plain).Elem())
+	named := jsonNames(reflect.TypeOf(v).Elem())
 	for name := range all {
 		if named[name] {
 			delete(all, name)
@@ -35,9 +38,9 @@ func unmarshalPlain(data []byte, plain any) (map[string]json.RawMessage, error) 
 	return all, nil
 }
 
-// marshalPlain writes plain, a type without these methods, and the extra fields that its names do not hide.
-func marshalPlain(plain any, extra map[string]json.RawMessage) ([]byte, error) {
-	data, err := json.Marshal(plain)
+// marshalWithExtra writes v, a fields type, and the extra fields that v does not name.
+func marshalWithExtra(v any, extra map[string]json.RawMessage) ([]byte, error) {
+	data, err := json.Marshal(v)
 	if err != nil || len(extra) == 0 {
 		return data, err
 	}

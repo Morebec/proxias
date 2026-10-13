@@ -21,24 +21,11 @@ import (
 // to and from: text, images, tool calls and results, cache breakpoints, and streaming.
 type ReasoningEngine struct {
 	claudeHelper
-	MaxTokens int
-}
-
-type ReasoningEngineOption func(*ReasoningEngine)
-
-// WithMaxTokens sets the maximum number of tokens for the ReasoningEngine.
-func WithMaxTokens(maxTokens int) ReasoningEngineOption {
-	return func(e *ReasoningEngine) {
-		e.MaxTokens = maxTokens
-	}
 }
 
 // NewReasoningEngine makes a ReasoningEngine that asks model through client.
-func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model, opts ...ReasoningEngineOption) *ReasoningEngine {
+func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model) *ReasoningEngine {
 	e := &ReasoningEngine{claudeHelper: claudeHelper{client, model}}
-	for _, o := range opts {
-		o(e)
-	}
 
 	return e
 }
@@ -62,7 +49,7 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 		if err != nil {
 			return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
-		return proxias.NewChatCompletionResponse(mapChatCompletion(message))
+		return proxias.NewChatCompletionResponse(req, mapChatCompletion(message))
 	}
 
 	stream := e.client.Messages.NewStreaming(ctx, params)

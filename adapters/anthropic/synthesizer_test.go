@@ -85,19 +85,18 @@ func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *te
 	// When
 	got, err := synthesizer.Synthesize(t.Context(), synthesis)
 
-	// Then the reply comes as a stream: role, text, finish, usage, end
+	// Then the reply comes as a stream: the message, finish, usage, end
 	require.NoError(t, err)
 	defer func() { _ = got.Body.Close() }()
 	assert.Equal(t, "text/event-stream", got.Header.Get("Content-Type"))
 	raw, err := io.ReadAll(got.Body)
 	require.NoError(t, err)
 	events := strings.Split(strings.TrimSpace(string(raw)), "\n\n")
-	require.Len(t, events, 5)
-	assert.Contains(t, events[0], `"delta":{"role":"assistant"}`)
-	assert.Contains(t, events[1], `"delta":{"content":"The api restarted."}`)
-	assert.Contains(t, events[2], `"finish_reason":"stop"`)
-	assert.Contains(t, events[3], `"usage":`)
-	assert.Equal(t, "data: [DONE]", events[4])
+	require.Len(t, events, 4)
+	assert.Contains(t, events[0], `"delta":{"role":"assistant","content":"The api restarted."}`)
+	assert.Contains(t, events[1], `"finish_reason":"stop"`)
+	assert.Contains(t, events[2], `"usage":`)
+	assert.Equal(t, "data: [DONE]", events[3])
 }
 
 func TestWorkflowExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults(t *testing.T) {

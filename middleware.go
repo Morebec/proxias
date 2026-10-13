@@ -25,20 +25,3 @@ type ProcessFunc func(ctx context.Context, req ChatCompletionRequest) (ChatCompl
 //		}
 //	}
 type Middleware func(next ProcessFunc) ProcessFunc
-
-// workflowDescriptorsKey is the key of the workflow descriptors in a context: unexported, so that only this
-// package sets them.
-type workflowDescriptorsKey struct{}
-
-// WithWorkflowDescriptors returns a context that carries the descriptors of the workflows that a request may ask
-// for. The WorkflowInterceptionMiddleware sets them before the rest of the chain, so that a reasoning engine can
-// tell what the application can do.
-func WithWorkflowDescriptors(ctx context.Context, descs []WorkflowDescriptor) context.Context {
-	return context.WithValue(ctx, workflowDescriptorsKey{}, descs)
-}
-
-// WorkflowDescriptorsFrom returns the workflow descriptors that the context carries, or nil if it carries none.
-func WorkflowDescriptorsFrom(ctx context.Context) []WorkflowDescriptor {
-	descs, _ := ctx.Value(workflowDescriptorsKey{}).([]WorkflowDescriptor)
-	return descs
-}

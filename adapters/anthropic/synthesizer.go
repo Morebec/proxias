@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -59,39 +58,5 @@ func (s *WorkflowExecutionSynthesizer) Synthesize(ctx context.Context, synthesis
 		return proxias.ChatCompletionResponse{}, errors.New("anthropic: synthesize: the model wrote no reply")
 	}
 
-	if !synthesis.Request.Stream {
-		return proxias.NewChatCompletionResponse(mapChatCompletion(message))
-	}
-	return proxias.NewChatCompletionStream(streamOf(message, text, synthesis.Request.UsageRequested())), nil
-}
-
-// streamOf is the stream of a whole reply, as Claude's stream would have sent it: the role, the text, the finish
-// reason, and the usage if asked for.
-func streamOf(message *anthropicsdk.Message, text string, includeUsage bool) func(emit func(proxias.ChatCompletionChunk) error) error {
-	return func(emit func(proxias.ChatCompletionChunk) error) error {
-		makeChunk := func(delta proxias.ChatCompletionDelta, finish *proxias.ChatFinishReason) proxias.ChatCompletionChunk {
-			return proxias.ChatCompletionChunk{
-				ID: message.ID, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: message.Model,
-				Choices: []proxias.ChatCompletionChunkChoice{{Delta: delta, FinishReason: finish}},
-			}
-		}
-
-		if err := emit(makeChunk(proxias.ChatCompletionDelta{Role: proxias.ChatMessageRoleAssistant}, nil)); err != nil {
-			return err
-		}
-		if err := emit(makeChunk(proxias.ChatCompletionDelta{Content: text}, nil)); err != nil {
-			return err
-		}
-		reason := mapFinishReason(message.StopReason)
-		if err := emit(makeChunk(proxias.ChatCompletionDelta{}, &reason)); err != nil {
-			return err
-		}
-		if includeUsage {
-			last := makeChunk(proxias.ChatCompletionDelta{}, nil)
-			last.Choices = []proxias.ChatCompletionChunkChoice{}
-			last.Usage = mapChatUsage(message.Usage, message.Usage.OutputTokens)
-			return emit(last)
-		}
-		return nil
-	}
+	return proxias.NewChatCompletionResponse(synthesis.Request, mapChatCompletion(message))
 }
