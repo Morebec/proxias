@@ -3,7 +3,9 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 )
@@ -41,4 +43,28 @@ func (c claudeHelper) askJSON(ctx context.Context, instructions string, input, a
 		return err
 	}
 	return decodeJSONObject(messageToString(message), answer)
+}
+
+// messageToString is the text that the model wrote.
+func messageToString(message *anthropicsdk.Message) string {
+	var text strings.Builder
+	for _, block := range message.Content {
+		if t, ok := block.AsAny().(anthropicsdk.TextBlock); ok {
+			text.WriteString(t.Text)
+		}
+	}
+	return text.String()
+}
+
+// decodeJSONObject reads the JSON object of the model's text into v. The model is told to answer with the
+// object only: a code fence or words around it are tolerated.
+func decodeJSONObject(text string, v any) error {
+	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	if start < 0 || end < start {
+		return errors.New("the model's answer has no JSON object")
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), v); err != nil {
+		return fmt.Errorf("the model's answer is not the expected JSON: %w", err)
+	}
+	return nil
 }

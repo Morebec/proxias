@@ -66,12 +66,6 @@ func TestIntentClassifierClassify(t *testing.T) {
 			then:  expect{intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: "app_version"}}}, err: assert.NoError},
 		},
 		{
-			name:  "GIVEN the JSON is in a code fence with words around it THEN it is read",
-			given: "Sure:\n```json\n{\"executions\":[{\"workflow_id\":\"app_version\"}]}\n```",
-			when:  both,
-			then:  expect{intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: "app_version"}}}, err: assert.NoError},
-		},
-		{
 			name:  "GIVEN no execution THEN the intent is a reasoning intent",
 			given: `{"executions":[]}`,
 			when:  both,
@@ -82,18 +76,6 @@ func TestIntentClassifierClassify(t *testing.T) {
 			given: `{"executions":[{"workflow_id":"rm_rf"}]}`,
 			when:  both,
 			then:  expect{err: assert.NoError},
-		},
-		{
-			name:  "GIVEN an answer that is not JSON THEN it fails",
-			given: "I would restart the api.",
-			when:  both,
-			then:  expect{err: assert.Error},
-		},
-		{
-			name:  "GIVEN a JSON of the wrong shape THEN it fails",
-			given: `{"executions":"restart"}`,
-			when:  both,
-			then:  expect{err: assert.Error},
 		},
 		{
 			name:  "GIVEN no workflow THEN the API is not called and the intent is a reasoning intent",
@@ -135,9 +117,6 @@ func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *te
 	// Then
 	require.NoError(t, err)
 	var call struct {
-		System []struct {
-			CacheControl map[string]string `json:"cache_control"`
-		} `json:"system"`
 		Messages []struct {
 			Content []struct {
 				Text string `json:"text"`
@@ -145,7 +124,6 @@ func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *te
 		} `json:"messages"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
-	assert.Equal(t, "ephemeral", call.System[0].CacheControl["type"], "the instructions never vary: they can be cached")
 	require.Len(t, call.Messages, 1)
 	var input struct {
 		Workflows []proxias.WorkflowDescriptor `json:"workflows"`

@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
@@ -68,10 +67,10 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 // about its capabilities accurately. The workflows are listed by name and description: their schemas are for the
 // classifier, not for the reasoning.
 func workflowsBlock(descs []proxias.WorkflowDescriptor) anthropicsdk.TextBlockParam {
-	var text strings.Builder
-	text.WriteString("The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n")
+	prompt := proxias.NewPrompt().AddSection("Workflows",
+		"The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:")
 	for _, d := range descs {
-		fmt.Fprintf(&text, "- %s: %s\n", d.Name, d.Description)
+		prompt.AddLabeledBulletPoint(d.Name, d.Description)
 	}
-	return anthropicsdk.TextBlockParam{Text: text.String()}
+	return anthropicsdk.TextBlockParam{Text: prompt.String()}
 }

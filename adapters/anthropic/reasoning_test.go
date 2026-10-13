@@ -412,7 +412,7 @@ func TestReasoningEngineReasonTellsTheModelTheWorkflows(t *testing.T) {
 		{
 			name:  "GIVEN workflows THEN the model is told what they are, after the harness's system prompt",
 			given: []proxias.WorkflowDescriptor{restartService, appVersion},
-			then:  "The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service\n- App version: Tells the running version\n",
+			then:  "## Workflows\nThe application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service\n- App version: Tells the running version",
 		},
 		{
 			name:  "GIVEN no workflow THEN no block is added",
