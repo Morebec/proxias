@@ -11,21 +11,64 @@
 
 ⚡ An AI gateway that provides a deterministic execution plane for LLM applications, as an embeddable Go SDK.
 
-[Why](#why) • [Features](#features) • [Getting started](#getting-started) • [How it works](#how-it-works) • [Usage](#usage) • [Adapters](#adapters) • [Middleware](#middleware)
+[Why](#why) • [Features](#features) • [Getting started](#getting-started) • [How it works](#how-it-works) • [Trade-offs](#trade-offs) • [Usage](#usage) • [Adapters](#adapters) • [Middleware](#middleware)
 
 </div>
 
 Proxias sits between a harness and its LLM. It speaks the OpenAI chat completions API, recognizes the requests that your own code can answer, runs that code directly, and asks the model only to put the result into words. Everything else goes to the LLM, as it would without Proxias.
 
+**The model selects and fills in a workflow; it never orchestrates one.**
+
 ## Why
 
-The usual agent is a ReAct loop: the LLM reads the request, picks a tool, reads its output, picks another, and so on until it answers. For the many requests that code can serve directly, that loop is:
+The usual agent is a ReAct loop: the harness calls the model, runs the tool it asks for, appends the output, and calls it again, until it answers. Take *"Create an invoice for Acme for March's work"*:
 
-- **slow and costly**: several LLM round trips, each re-reading a context that grows with every tool output;
-- **non-deterministic**: the same request may take a different path, or a wrong one, from one run to the next;
-- **exposed**: every tool output is read by the model that decides which tool to call next, a wide surface for prompt injection.
+1. the model asks for `find_customer("Acme")`, and the harness runs it;
+2. the model reads the customer and asks for `create_invoice(...)`, and the harness runs it;
+3. the model reads the confirmation and writes the reply.
 
-Proxias flips it: recognizing an intent is a fast **System-1** task, running it is compiled and tested Go, and the LLM is kept for **System-2**, once, at the end.
+That is three calls, each larger than the last, and on every run the model decides the steps and their arguments again. For repeatable business processes, the loop costs more and varies more than the work needs:
+
+- **Cost grows with history.** The API is stateless: every call re-sends the conversation, the tool definitions and every earlier output. Caching makes the repeated prefix cheaper, but the context still grows.
+- **Paths vary.** The same request can take another sequence, other arguments, or another number of calls.
+- **Valid tools get misused.** Invented tools are rare; wrong parameters, wrong order, actions beyond what the user meant, and prompt injection through tool outputs are not.
+- **Hard to audit and test.** Reasoning, selection and execution are interleaved across calls, with no fixed set of paths to regression-test.
+
+With Proxias, the same request goes like this:
+
+1. a fast **System-1** step picks `billing.create_invoice` from the workflows' names and descriptions;
+2. a small model fills in the customer and the period, seeing only that workflow's schema;
+3. your engine validates them and runs the fixed steps: find the customer, create the invoice, send it;
+4. a small model puts the result into words.
+
+```mermaid
+flowchart TD
+    request(["Request from the harness"])
+    select["<b>Pick the workflows</b><br/>System-1 classifier<br/>sees only IDs, names, descriptions"]
+    match{"Workflow<br/>asked for?"}
+    extract["<b>Fill in parameters</b><br/>small model<br/>sees only the chosen schemas"]
+    run["<b>Run the workflows</b><br/>your WorkflowExecutionEngine<br/>validation, permissions, fixed steps:<br/>the only side effects"]
+    synth["<b>Synthesize the result</b><br/>small model or templates<br/>sees only the structured results"]
+    reason["<b>Reasoning</b><br/>the LLM, as without Proxias"]
+    reply(["Reply to the harness"])
+
+    request --> select --> match
+    match -- yes --> extract --> run --> synth --> reply
+    match -- no --> reason --> reply
+
+    classDef effect stroke:#3b82f6,stroke-width:2px
+    class run effect
+```
+
+Only the engine changes anything; every other step is one narrow decision. What that buys:
+
+- **Fewer tokens.** Selection sees the catalogue's names and descriptions, extraction one schema, synthesis one result: no growing tool loop. How much is saved depends on your catalogue and traffic, so measure it.
+- **Deterministic execution.** The steps are compiled, tested Go: the same inputs give the same side effects.
+- **A bounded action space.** The model cannot do anything the workflows do not expose, which also narrows what a prompt injection can reach. Reads are workflows too, under the same controls as writes.
+- **One place for control.** Validation, permissions, approvals and audit live in your engine and in middleware, not in a prompt.
+- **Debuggable by stage.** The choice, the parameters, the run and the reply are separate, and each can be logged and tested on its own.
+
+The authority to define a process stays with whoever writes the workflow, and the user's choices stay with the user.
 
 ## Features
 
@@ -94,6 +137,21 @@ An `Intent` with no workflow is a **reasoning intent** (`IsReasoningIntent`): no
 
 > [!TIP]
 > A workflow that cannot run for a reason the user should hear of (a missing parameter, an invalid input) is not an error: return a result whose `Status` says so, with the reason in `Data`, and the synthesizer explains it. Errors are for failures of the system, and are returned wrapped with their stage, so `errors.Is` finds the cause.
+
+The engine is yours, so anything can run behind it: plain Go, a job queue, RPA tools, or MCP servers, which then become a controlled backend instead of an open action space. A long-running workflow can return a task ID, and checking on it is another workflow.
+
+## Trade-offs
+
+Proxias trades flexibility for reliability, and it moves some risks rather than removing them:
+
+- **Workflows come first.** A process must be mapped, written and given a schema before an agent can use it, and that takes domain knowledge.
+- **Open-ended requests bypass it.** Brainstorming and the like go to the reasoning engine. Give that lane no tools, or read-only ones.
+- **The classifier can be wrong.** It can pick the wrong workflow or miss the right one. Evaluate it on labeled examples, and prefer the reasoning intent (or a clarifying question) when unsure.
+- **Parameters can be plausible but wrong.** Validate them in the engine, confirm high-impact actions, and require approval for risky ones.
+- **Prompt injection is narrowed, not gone.** User text and workflow results are still untrusted input to the models that read them.
+- **Follow-ups need defined behavior.** *"Do the same for March"* is classified with the conversation it comes in; decide what your workflows do with it.
+- **Several models per request.** Each is small, but their latency adds up.
+- **A synthesizer can misstate a result.** Use templates for the figures that matter (`WorkflowExecutionSynthesizerFunc`) rather than letting a model paraphrase them.
 
 ## Usage
 
@@ -180,6 +238,8 @@ reasoner := openai.NewReasoningEngine(client, "openai/gpt-5")
 - **pass on** a changed request, for instance to route the model: `req.Model = chooseModel(req); return next(ctx, req)`;
 - **add to the context** what the rest needs, as the interception middleware does with `WithWorkflowDescriptors` / `WorkflowDescriptorsFrom`.
 
+Because the chain sits outside the harness, it is one place for what every request should go through, whatever the harness: stripping personal data before it reaches a model, authorization and injection screening, model selection and provider fallback, context compaction, telemetry. Proxias ships the chain, not these steps.
+
 > [!WARNING]
 > A request is passed by value, but its slices and maps are shared with the caller. Replace them, never edit them in place: `req.Messages = append([]proxias.ChatMessage{system}, req.Messages...)`.
 
@@ -211,3 +271,4 @@ OpenClaw starts from a fresh state in `.sandbox/openclaw`, so it never touches y
 ## Performance
 
 `task bench` measures the ControlPlane's own overhead with fakes that answer instantly: about 0.1 µs and no allocation per request. The time that counts is your classifier's: keep it local and it adds milliseconds at most, well under the 50 ms a request should take before the LLM is reached.
+
