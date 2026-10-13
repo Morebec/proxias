@@ -269,6 +269,19 @@ func TestChatCompletionRequestWithoutOptionalFieldsGainsNone(t *testing.T) {
 	assert.Nil(t, req.Extra)
 }
 
+func TestChatCompletionRequestUnmarshalJSONLeavesNothingOfAPreviousValue(t *testing.T) {
+	// Given a request already read once, with a model and an extra field
+	var req proxias.ChatCompletionRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"m","seed":7,"messages":[]}`), &req))
+
+	// When another one is read into it
+	require.NoError(t, json.Unmarshal([]byte(`{"messages":[]}`), &req))
+
+	// Then only the second is there
+	assert.Empty(t, req.Model)
+	assert.Nil(t, req.Extra)
+}
+
 func TestChatContentWithAnExtraIsNotACollapsedString(t *testing.T) {
 	// Given a lone text part that carries a field of its own
 	content := proxias.ChatContent{{Type: proxias.ChatContentPartTypeText, Text: "listen", Extra: map[string]json.RawMessage{"input_audio": json.RawMessage(`{"format":"wav"}`)}}}

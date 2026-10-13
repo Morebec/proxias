@@ -276,14 +276,7 @@ type ChatFunction struct {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatCompletionRequest) UnmarshalJSON(data []byte) error {
 	type fields ChatCompletionRequest
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatCompletionRequest(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -295,14 +288,7 @@ func (r ChatCompletionRequest) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatStreamOptions) UnmarshalJSON(data []byte) error {
 	type fields ChatStreamOptions
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatStreamOptions(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -314,14 +300,7 @@ func (r ChatStreamOptions) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 	type fields ChatMessage
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*m = ChatMessage(f)
-	m.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(m), &m.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -333,14 +312,7 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatContentPart) UnmarshalJSON(data []byte) error {
 	type fields ChatContentPart
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatContentPart(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -352,14 +324,7 @@ func (r ChatContentPart) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatImageURL) UnmarshalJSON(data []byte) error {
 	type fields ChatImageURL
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatImageURL(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -371,14 +336,7 @@ func (r ChatImageURL) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatToolCall) UnmarshalJSON(data []byte) error {
 	type fields ChatToolCall
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatToolCall(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -390,14 +348,7 @@ func (r ChatToolCall) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatFunctionCall) UnmarshalJSON(data []byte) error {
 	type fields ChatFunctionCall
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatFunctionCall(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -409,14 +360,7 @@ func (r ChatFunctionCall) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatTool) UnmarshalJSON(data []byte) error {
 	type fields ChatTool
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatTool(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.
@@ -428,14 +372,7 @@ func (r ChatTool) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler. The fields the type does not name are kept in Extra.
 func (r *ChatFunction) UnmarshalJSON(data []byte) error {
 	type fields ChatFunction
-	var f fields
-	extra, err := unmarshalWithExtra(data, &f)
-	if err != nil {
-		return err
-	}
-	*r = ChatFunction(f)
-	r.Extra = extra
-	return nil
+	return unmarshalWithExtra(data, (*fields)(r), &r.Extra)
 }
 
 // MarshalJSON implements json.Marshaler. The fields of Extra are written, unless a typed field has the same name.

@@ -14,16 +14,17 @@ import (
 // The methods of each type convert it to a local type named fields: the same fields, without the methods, so that
 // encoding it does not call the method again.
 
-// unmarshalWithExtra reads data into v, a pointer to a fields type, and returns the extra fields: those of data
-// that v does not name.
-func unmarshalWithExtra(data []byte, v any) (map[string]json.RawMessage, error) {
+// unmarshalWithExtra reads data into v, a pointer to a fields type, and the fields of data that v does not name
+// into extra. v is zeroed first, so that nothing of a previous value is left.
+func unmarshalWithExtra(data []byte, v any, extra *map[string]json.RawMessage) error {
+	reflect.ValueOf(v).Elem().SetZero()
 	if err := json.Unmarshal(data, v); err != nil {
-		return nil, err
+		return err
 	}
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
-		return nil, err
+		return err
 	}
 
 	named := jsonNames(reflect.TypeOf(v).Elem())
@@ -33,9 +34,10 @@ func unmarshalWithExtra(data []byte, v any) (map[string]json.RawMessage, error) 
 		}
 	}
 	if len(all) == 0 {
-		return nil, nil
+		all = nil
 	}
-	return all, nil
+	*extra = all
+	return nil
 }
 
 // marshalWithExtra writes v, a fields type, and the extra fields that v does not name.
