@@ -77,7 +77,7 @@ func NewCompositeIntentClassifier(selector WorkflowExecutionIntentSelector, para
 
 // Classify selects the workflows the request asks for, then extracts their parameters. Nothing is extracted
 // if no workflow was selected: the intent is then a reasoning intent.
-func (c CompositeIntentClassifier) Classify(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
+func (c *CompositeIntentClassifier) Classify(ctx context.Context, req ChatCompletionRequest, descs []WorkflowDescriptor) (Intent, error) {
 	matchedWorkflowDescs, err := c.selector.Select(ctx, req, descs)
 	if err != nil {
 		return Intent{}, err
