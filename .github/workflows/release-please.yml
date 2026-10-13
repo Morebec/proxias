@@ -1,0 +1,21 @@
+name: Release Please
+
+# Keeps a release pull request up to date from the conventional pull request titles merged into main
+# (changelog + version). Merging it tags vX.Y.Z (what `go get` resolves) and creates the GitHub release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

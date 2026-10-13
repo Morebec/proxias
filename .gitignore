@@ -1,0 +1,27 @@
+# Build output and test artifacts
+coverage.*
+*.test
+*.out
+*.prof
+/bin/
+/dist/
+
+# Go workspaces and vendored code
+go.work
+go.work.sum
+vendor/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# The sandbox's state (task sandbox:openclaw)
+.sandbox/
+
+# The sandbox's secrets (task sandbox reads it)
+.env

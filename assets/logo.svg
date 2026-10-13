@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Proxias">
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="50" x2="0" y2="150">
+      <stop offset="0" stop-color="#7cf57e"/>
+      <stop offset="1" stop-color="#3dd55f"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="32" fill="#1a1f29"/>
+  <circle cx="100" cy="100" r="80" fill="#242b36"/>
+  <!-- a "P" drawn as a circuit: a request trace enters through a gap in the stem and is caught by the via inside the bowl -->
+  <rect x="68" y="50" width="20" height="24" rx="10" fill="url(#g)"/>
+  <rect x="68" y="98" width="20" height="52" rx="10" fill="url(#g)"/>
+  <path d="M78 60 H116 L134 78 V94 L116 112 H78" fill="none" stroke="url(#g)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M44 86 H96" fill="none" stroke="#7cf57e" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="40" cy="86" r="6" fill="#242b36" stroke="#7cf57e" stroke-width="4"/>
+  <circle cx="106" cy="86" r="8" fill="#242b36" stroke="#7cf57e" stroke-width="5"/>
+</svg>

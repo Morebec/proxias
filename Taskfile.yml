@@ -1,0 +1,127 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  # Keep in step with `version:` of golangci-lint-action in .github/workflows/ci.yml, so that what passes
+  # here passes in CI. Run through `go run`: no binary to install, and none to be out of date.
+  GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0
+  DEADCODE: golang.org/x/tools/cmd/deadcode@v0.51.0
+  # The sandbox (examples/sandbox), and OpenClaw, which runs in a container so that nobody installs its dependencies.
+  # Its state is .sandbox/openclaw, not the user's OpenClaw setup.
+  SANDBOX_PORT: "8787"
+  SANDBOX_HOME: '{{.ROOT_DIR}}/.sandbox/openclaw'
+  SANDBOX_CONTAINER: proxias-sandbox-openclaw
+  SANDBOX_TOKEN: proxias-sandbox
+  OPENCLAW_IMAGE: ghcr.io/openclaw/openclaw:2026.9.7
+
+tasks:
+  default:
+    desc: List the tasks
+    silent: true
+    cmds:
+      - task --list
+
+  check:
+    desc: Everything CI checks, in the same order
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: bench:smoke
+
+  test:
+    desc: Run the tests, with the race detector
+    cmds:
+      - go test -race ./... {{.CLI_ARGS}}
+
+  test:cover:
+    desc: Run the tests and write coverage.out (and print the coverage by function)
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+
+  lint:
+    desc: Run golangci-lint (the linters, and the formatters' check)
+    cmds:
+      - go run {{.GOLANGCI_LINT}} run ./... {{.CLI_ARGS}}
+
+  fmt:
+    desc: Format the code with the formatters of .golangci.yml
+    cmds:
+      - go run {{.GOLANGCI_LINT}} fmt ./...
+
+  fmt:check:
+    desc: Fail if a file is not gofmt-formatted
+    cmds:
+      - |
+        unformatted="$(gofmt -l .)"
+        if [ -n "$unformatted" ]; then echo "not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
+
+  bench:
+    desc: Run the benchmarks (the ControlPlane's own overhead)
+    cmds:
+      - go test -run '^$' -bench . -benchmem ./... {{.CLI_ARGS}}
+
+  bench:smoke:
+    desc: Run each benchmark 100 times, to see that it still runs
+    cmds:
+      - go test -run '^$' -bench . -benchtime 100x ./...
+
+  example:
+    desc: Run the basic example
+    cmds:
+      - go run ./examples/basic
+
+  deadcode:
+    desc: List the functions that no test or example reaches
+    cmds:
+      - go run {{.DEADCODE}} -test ./...
+
+  sandbox:
+    desc: Run the middleware sandbox (examples/sandbox), the endpoint a harness talks to. SANDBOX_PORT=... changes its port
+    env:
+      PROXIAS_ADDR: ":{{.SANDBOX_PORT}}"
+    cmds:
+      - go run ./examples/sandbox
+
+  sandbox:openclaw:
+    desc: Run OpenClaw in a container, configured to use the sandbox (run sandbox first). Its gateway is on :18789. Needs Docker
+    preconditions:
+      - sh: docker info > /dev/null 2>&1
+        msg: "Docker is needed: OpenClaw runs in a container"
+    cmds:
+      # A fresh state each run: a lease or a backup left by a previous run would stop the gateway, or bring back an old config.
+      - rm -rf {{.SANDBOX_HOME}}
+      - mkdir -p {{.SANDBOX_HOME}}
+      - |
+        cat > {{.SANDBOX_HOME}}/openclaw.json <<'JSON'
+        {
+          "gateway": { "mode": "local" },
+          "tools": { "toolSearch": false },
+          "agents": { "defaults": { "model": { "primary": "proxias/proxias-sandbox" } } },
+          "models": {
+            "mode": "merge",
+            "providers": {
+              "proxias": {
+                "baseUrl": "http://host.docker.internal:{{.SANDBOX_PORT}}/v1",
+                "apiKey": "proxias-sandbox",
+                "api": "openai-completions",
+                "models": [
+                  { "id": "proxias-sandbox", "name": "Proxias sandbox", "reasoning": false, "input": ["text"], "contextWindow": 128000 }
+                ]
+              }
+            }
+          }
+        }
+        JSON
+      - docker run --rm --name {{.SANDBOX_CONTAINER}} -p 127.0.0.1:18789:18789 --add-host=host.docker.internal:host-gateway -e OPENCLAW_STATE_DIR=/openclaw -e OPENCLAW_CONFIG_PATH=/openclaw/openclaw.json -v {{.SANDBOX_HOME}}:/openclaw {{.OPENCLAW_IMAGE}} openclaw gateway --bind lan --auth token --token {{.SANDBOX_TOKEN}}
+
+  sandbox:openclaw:dashboard:
+    desc: Print the link to the OpenClaw Control UI of sandbox:openclaw, with its token already in it
+    cmds:
+      - echo "Open http://127.0.0.1:18789/#token={{.SANDBOX_TOKEN}}"
+
+  sandbox:openclaw:agent:
+    desc: Send a message to the OpenClaw of sandbox:openclaw, through its gateway. The message is the argument, after --
+    cmds:
+      - docker exec -e OPENCLAW_GATEWAY_TOKEN={{.SANDBOX_TOKEN}} {{.SANDBOX_CONTAINER}} openclaw agent --message "{{.CLI_ARGS}}" --timeout 120
