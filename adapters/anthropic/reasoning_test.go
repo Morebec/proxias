@@ -38,6 +38,7 @@ func mockAnthropic(t *testing.T, status int, body string) (anthropicsdk.Client, 
 			contentType = "text/event-stream"
 		}
 		w.Header().Set("content-type", contentType)
+		w.Header().Set("request-id", "req_1")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -256,28 +257,88 @@ func TestReasoningEngineReasonMapsTheAnswer(t *testing.T) {
 	}
 }
 
-func TestReasoningEngineReasonReturnsTheAPIError(t *testing.T) {
+func TestReasoningEngineReasonReturnsTheAPIErrorAsAResponse(t *testing.T) {
+	type args struct {
+		status int
+		body   string
+		req    proxias.ChatCompletionRequest
+	}
+	type expect struct {
+		status int
+		body   string
+	}
+	claudeError := `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`
 	tests := []struct {
-		name  string
-		given proxias.ChatCompletionRequest
+		name string
+		when args
+		then expect
 	}{
-		{name: "canonical", given: userSays("hello")},
-		{name: "GIVEN a stream THEN the error is returned too, not sent inside the stream", given: proxias.ChatCompletionRequest{Stream: true, Messages: userSays("hello").Messages}},
+		{
+			name: "canonical",
+			when: args{
+				status: 429,
+				body:   claudeError,
+				req:    userSays("hello"),
+			},
+			then: expect{
+				status: 429,
+				body:   `{"error":{"message":"slow down","type":"rate_limit_error"}}`,
+			},
+		},
+		{
+			name: "WHEN the harness streams THEN the error is a response too, not sent inside a stream",
+			when: args{
+				status: 429,
+				body:   claudeError,
+				req:    proxias.ChatCompletionRequest{Stream: true, Messages: userSays("hello").Messages},
+			},
+			then: expect{
+				status: 429,
+				body:   `{"error":{"message":"slow down","type":"rate_limit_error"}}`,
+			},
+		},
+		{
+			name: "WHEN the body is not Claude's error THEN it is kept as it is",
+			when: args{
+				status: 502,
+				body:   "<html>bad gateway</html>",
+				req:    userSays("hello"),
+			},
+			then: expect{
+				status: 502,
+				body:   "<html>bad gateway</html>",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := mockAnthropic(t, 429, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)
+			client, _ := mockAnthropic(t, tt.when.status, tt.when.body)
 			engine := anthropic.NewReasoningEngine(client, someModel)
 
-			got, err := engine.Reason(t.Context(), tt.given, nil)
+			got, err := engine.Reason(t.Context(), tt.when.req, nil)
 
-			var apiErr *anthropicsdk.Error
-			require.ErrorAs(t, err, &apiErr)
-			assert.Equal(t, 429, apiErr.StatusCode)
-			assert.ErrorContains(t, err, "anthropic: ")
-			assert.Nil(t, got.Body)
+			require.NoError(t, err)
+			defer func() { _ = got.Body.Close() }()
+			assert.Equal(t, tt.then.status, got.Status)
+			assert.Equal(t, "req_1", got.Header.Get("Request-Id"), "the provider's headers are forwarded")
+			body, err := io.ReadAll(got.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.then.body, string(body))
 		})
 	}
+}
+
+func TestReasoningEngineReasonFailsWhenTheAPICannotBeReached(t *testing.T) {
+	// Given an API that is gone
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	client := anthropicsdk.NewClient(option.WithAPIKey("secret-key"), option.WithBaseURL(server.URL), option.WithMaxRetries(0))
+
+	// When
+	_, err := anthropic.NewReasoningEngine(client, someModel).Reason(t.Context(), userSays("hello"), nil)
+
+	// Then there is no response to forward: it is an error
+	assert.ErrorContains(t, err, "anthropic: ")
 }
 
 func TestReasoningEngineReasonStreamsTheAnswer(t *testing.T) {

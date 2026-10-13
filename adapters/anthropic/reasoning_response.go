@@ -1,6 +1,10 @@
 package anthropic
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
@@ -8,6 +12,55 @@ import (
 
 	"github.com/morebec/proxias"
 )
+
+// mapErrorResponse maps an error of the API to the response it came with, for the harness to get as it would from
+// an OpenAI-compatible API: the status and the headers of the provider, and its error in the chat completions'
+// shape, {"error":{"message","type"}}, Claude's type kept. A body that is not Claude's error JSON is kept as it
+// is. An error that came with no response, a network one, has nothing to map.
+func mapErrorResponse(err error) (proxias.ChatCompletionResponse, bool) {
+	var apiErr *anthropicsdk.Error
+	if !errors.As(err, &apiErr) || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return proxias.ChatCompletionResponse{}, false
+	}
+	// The SDK read the body into the error, and put it back.
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	if readErr != nil {
+		return proxias.ChatCompletionResponse{}, false
+	}
+
+	// The hop-by-hop headers are of the connection to the provider, not of its response.
+	header := apiErr.Response.Header.Clone()
+	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
+		header.Del(name)
+	}
+
+	var claude struct {
+		Type  string `json:"type"`
+		Error *struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &claude) == nil && claude.Type == "error" && claude.Error != nil {
+		var mapped struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+		}
+		mapped.Error.Message, mapped.Error.Type = claude.Error.Message, claude.Error.Type
+		if data, marshalErr := json.Marshal(mapped); marshalErr == nil {
+			body = data
+			// A new body: the length and the encoding of the provider's are not its own.
+			header.Del("Content-Length")
+			header.Del("Content-Encoding")
+			header.Set("Content-Type", "application/json")
+		}
+	}
+
+	return proxias.ChatCompletionResponse{Status: apiErr.StatusCode, Header: header, Body: io.NopCloser(bytes.NewReader(body))}, true
+}
 
 // mapFinishReason maps why Claude stopped.
 func mapFinishReason(stopReason anthropicsdk.StopReason) proxias.ChatFinishReason {

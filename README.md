@@ -142,7 +142,9 @@ A workflow's reply is built with `NewChatCompletionBuilder(req).BuildText(...)` 
 
 ## Adapters
 
-Each adapter implements the components (classifier, selector, parameter extractor, synthesizer, reasoning engine) through the provider's official SDK. You build the client, so the key, base URL, timeout and retries are yours, and so is the model. A failing call returns the SDK's error, wrapped, for `errors.As`.
+Each adapter implements the components (classifier, selector, parameter extractor, synthesizer, reasoning engine) through the provider's official SDK. You build the client, so the key, base URL, timeout and retries are yours, and so is the model.
+
+Proxias is a gateway, as transparent as it can be: a reasoning engine answers a provider's error with a response, the provider's status and headers included (Claude's error is put in the chat completions' shape), and only a call that got no response at all is an error. The other components return the SDK's error, wrapped, for `errors.As`.
 
 ### Anthropic
 

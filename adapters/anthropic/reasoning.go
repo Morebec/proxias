@@ -1,8 +1,9 @@
 // Package anthropic implements the components of Proxias with Claude, through the official Anthropic SDK.
 //
 // The host builds the SDK client, and so owns the API key, the timeout, the retries and the base URL, and
-// always chooses the model. A failing call returns the SDK's error, wrapped: errors.As finds an
-// *anthropic.Error of the SDK, and its status code.
+// always chooses the model. A failing call of a component returns the SDK's error, wrapped: errors.As finds an
+// *anthropic.Error of the SDK, and its status code. The ReasoningEngine is as transparent as it can be: it returns
+// an error response of the API as a response.
 package anthropic
 
 import (
@@ -31,8 +32,9 @@ func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model) *R
 
 // Reason implements proxias.ReasoningEngine. The workflow descriptors are not used.
 //
-// The answer is streamed if req.Stream is set. An error of the API is returned, wrapped, even for a stream:
-// the first event is read before the response is.
+// The answer is streamed if req.Stream is set. An error response of the API is returned as a response, as
+// transparent as it can be (see mapErrorResponse), even for a stream: the first event is read before the
+// response is. Only a call that got no response is an error.
 func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
 	params, err := mapChatCompletionRequestToMessageParams(req, e.model)
 	if err != nil {
@@ -46,6 +48,9 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 	if !req.Stream {
 		message, err := e.client.Messages.New(ctx, params)
 		if err != nil {
+			if resp, ok := mapErrorResponse(err); ok {
+				return resp, nil
+			}
 			return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
 		return proxias.NewChatCompletionResponse(req, mapChatCompletion(message))
@@ -57,6 +62,9 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 		_ = stream.Close()
 		if err == nil {
 			err = errors.New("the API answered nothing")
+		}
+		if resp, ok := mapErrorResponse(err); ok {
+			return resp, nil
 		}
 		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: %w", err)
 	}
