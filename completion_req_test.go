@@ -206,6 +206,7 @@ func TestChatCompletionRequestKeepsTheFieldsItDoesNotName(t *testing.T) {
 	// Given a request with fields at every level that the model does not name
 	body := `{
 		"model":"m","temperature":0.2,"response_format":{"type":"json_object"},
+		"stream":true,"stream_options":{"include_usage":true,"include_obfuscation":false},
 		"messages":[
 			{"role":"user","name":"ada","content":[
 				{"type":"text","text":"listen","input_audio":{"format":"wav"}},

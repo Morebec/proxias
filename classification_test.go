@@ -9,6 +9,12 @@ import (
 	"github.com/morebec/proxias"
 )
 
+func mockClassifier(intent proxias.Intent, err error) proxias.IntentClassifier {
+	return proxias.IntentClassifierFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+		return intent, err
+	})
+}
+
 func mockWorkflowSelector(returnedDescriptors []proxias.WorkflowDescriptor, err error) proxias.WorkflowExecutionIntentSelector {
 	return proxias.WorkflowExecutionIntentSelectorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowDescriptor, error) {
 		return returnedDescriptors, err
