@@ -11,32 +11,32 @@ import (
 	"github.com/morebec/proxias/adapters/openai"
 )
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParameters(t *testing.T) {
 	type expect struct {
-		executions []proxias.WorkflowExecutionIntent
+		executions []proxias.ActionExecutionIntent
 		err        assert.ErrorAssertionFunc
 	}
 	tests := []struct {
 		name  string
 		given string // the text the model writes
-		when  []proxias.WorkflowDescriptor
+		when  []proxias.ActionDescriptor
 		then  expect
 	}{
 		{
 			name:  "canonical",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]}`,
-			when:  []proxias.WorkflowDescriptor{restartService},
-			then:  expect{executions: []proxias.WorkflowExecutionIntent{{WorkflowID: "restart_service", Params: map[string]any{"service": "api"}}}, err: assert.NoError},
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}}]}`,
+			when:  []proxias.ActionDescriptor{restartService},
+			then:  expect{executions: []proxias.ActionExecutionIntent{{ActionID: "restart_service", Params: map[string]any{"service": "api"}}}, err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow that was not matched THEN it is dropped",
-			given: `{"executions":[{"workflow_id":"app_version"}]}`,
-			when:  []proxias.WorkflowDescriptor{restartService},
+			name:  "GIVEN an action that was not matched THEN it is dropped",
+			given: `{"executions":[{"action_id":"app_version"}]}`,
+			when:  []proxias.ActionDescriptor{restartService},
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN no workflow matched THEN the API is not called",
-			given: `{"executions":[{"workflow_id":"restart_service"}]}`,
+			name:  "GIVEN no action matched THEN the API is not called",
+			given: `{"executions":[{"action_id":"restart_service"}]}`,
 			when:  nil,
 			then:  expect{err: assert.NoError},
 		},
@@ -44,7 +44,7 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, got := mockOpenAI(t, http.StatusOK, answerWith(tt.given))
-			extractor := openai.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+			extractor := openai.NewActionExecutionIntentParameterExtractor(client, someModel)
 
 			executions, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), tt.when)
 
@@ -57,26 +57,26 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T
 	}
 }
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParametersSendsTheSchemas(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParametersSendsTheSchemas(t *testing.T) {
 	// Given
 	client, got := mockOpenAI(t, http.StatusOK, answerWith(`{"executions":[]}`))
-	extractor := openai.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+	extractor := openai.NewActionExecutionIntentParameterExtractor(client, someModel)
 
 	// When
-	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	require.NoError(t, err)
 	assert.Contains(t, sentInput(t, got), `"schema":{"required":["service"],"type":"object"}`, "the extractor sees the parameters")
 }
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParametersReturnsTheAPIError(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParametersReturnsTheAPIError(t *testing.T) {
 	// Given
 	client, _ := mockOpenAI(t, http.StatusTooManyRequests, `{"error":{"type":"rate_limit_error","message":"slow down"}}`)
-	extractor := openai.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+	extractor := openai.NewActionExecutionIntentParameterExtractor(client, someModel)
 
 	// When
-	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	assert.ErrorContains(t, err, "openai: extract parameters")

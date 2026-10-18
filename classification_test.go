@@ -10,32 +10,32 @@ import (
 )
 
 func mockClassifier(intent proxias.Intent, err error) proxias.IntentClassifier {
-	return proxias.IntentClassifierFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+	return proxias.IntentClassifierFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.ActionDescriptor) (proxias.Intent, error) {
 		return intent, err
 	})
 }
 
-func mockWorkflowSelector(returnedDescriptors []proxias.WorkflowDescriptor, err error) proxias.WorkflowExecutionIntentSelector {
-	return proxias.WorkflowExecutionIntentSelectorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowDescriptor, error) {
+func mockActionSelector(returnedDescriptors []proxias.ActionDescriptor, err error) proxias.ActionExecutionIntentSelector {
+	return proxias.ActionExecutionIntentSelectorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.ActionDescriptor) ([]proxias.ActionDescriptor, error) {
 		return returnedDescriptors, err
 	})
 }
 
-func mockParamExtractor(executions []proxias.WorkflowExecutionIntent, err error) proxias.WorkflowExecutionIntentParameterExtractor {
-	return proxias.WorkflowExecutionIntentParameterExtractorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) ([]proxias.WorkflowExecutionIntent, error) {
+func mockParamExtractor(executions []proxias.ActionExecutionIntent, err error) proxias.ActionExecutionIntentParameterExtractor {
+	return proxias.ActionExecutionIntentParameterExtractorFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.ActionDescriptor) ([]proxias.ActionExecutionIntent, error) {
 		return executions, err
 	})
 }
 
-var someWorkflowDescriptor = proxias.WorkflowDescriptor{ID: "some_workflow"}
-var someOtherWorkflowDescriptor = proxias.WorkflowDescriptor{ID: "some_other_workflow"}
-var someWorkflowExecutionIntent = proxias.WorkflowExecutionIntent{WorkflowID: "some_workflow"}
-var someOtherWorkflowExecutionIntent = proxias.WorkflowExecutionIntent{WorkflowID: "some_other_workflow"}
+var someActionDescriptor = proxias.ActionDescriptor{ID: "some_action"}
+var someOtherActionDescriptor = proxias.ActionDescriptor{ID: "some_other_action"}
+var someActionExecutionIntent = proxias.ActionExecutionIntent{ActionID: "some_action"}
+var someOtherActionExecutionIntent = proxias.ActionExecutionIntent{ActionID: "some_other_action"}
 
 func TestCompositeIntentClassifierClassify(t *testing.T) {
 	type assumptions struct {
-		selector  proxias.WorkflowExecutionIntentSelector
-		extractor proxias.WorkflowExecutionIntentParameterExtractor
+		selector  proxias.ActionExecutionIntentSelector
+		extractor proxias.ActionExecutionIntentParameterExtractor
 	}
 	type expect struct {
 		intent proxias.Intent
@@ -49,20 +49,20 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 		{
 			name: "canonical",
 			given: assumptions{
-				selector: mockWorkflowSelector([]proxias.WorkflowDescriptor{
-					someWorkflowDescriptor,
+				selector: mockActionSelector([]proxias.ActionDescriptor{
+					someActionDescriptor,
 				}, nil),
-				extractor: mockParamExtractor([]proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}, nil),
+				extractor: mockParamExtractor([]proxias.ActionExecutionIntent{someActionExecutionIntent}, nil),
 			},
 			then: expect{
-				intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}},
+				intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{someActionExecutionIntent}},
 				err:    assert.NoError,
 			},
 		},
 		{
 			name: "WHEN selector fails THEN should return an error",
 			given: assumptions{
-				selector:  mockWorkflowSelector(nil, assert.AnError),
+				selector:  mockActionSelector(nil, assert.AnError),
 				extractor: mockParamExtractor(nil, nil),
 			},
 			then: expect{intent: proxias.Intent{}, err: assert.Error},
@@ -70,7 +70,7 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 		{
 			name: "WHEN extractor fails THEN should return an error",
 			given: assumptions{
-				selector:  mockWorkflowSelector([]proxias.WorkflowDescriptor{someWorkflowDescriptor}, nil),
+				selector:  mockActionSelector([]proxias.ActionDescriptor{someActionDescriptor}, nil),
 				extractor: mockParamExtractor(nil, assert.AnError),
 			},
 			then: expect{intent: proxias.Intent{}, err: assert.Error},
@@ -80,9 +80,9 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			classifier := proxias.NewCompositeIntentClassifier(tt.given.selector, tt.given.extractor)
 
-			got, err := classifier.Classify(t.Context(), proxias.ChatCompletionRequest{Model: "m"}, []proxias.WorkflowDescriptor{
-				someWorkflowDescriptor,
-				someOtherWorkflowDescriptor,
+			got, err := classifier.Classify(t.Context(), proxias.ChatCompletionRequest{Model: "m"}, []proxias.ActionDescriptor{
+				someActionDescriptor,
+				someOtherActionDescriptor,
 			})
 
 			tt.then.err(t, err)
@@ -94,18 +94,18 @@ func TestCompositeIntentClassifierClassify(t *testing.T) {
 func TestIntentClassifierFuncClassify(t *testing.T) {
 	expectedCtx := t.Context()
 	expectedReq := proxias.ChatCompletionRequest{Model: "some_model"}
-	expectedDescriptors := []proxias.WorkflowDescriptor{
-		{Name: "SomeWorkflow"},
+	expectedDescriptors := []proxias.ActionDescriptor{
+		{Name: "SomeAction"},
 	}
 	expectedIntent := proxias.Intent{
-		WorkflowExecutions: []proxias.WorkflowExecutionIntent{
-			{WorkflowID: "some_workflow_id"},
+		ActionExecutions: []proxias.ActionExecutionIntent{
+			{ActionID: "some_action_id"},
 		},
 	}
 	expectedErr := assert.AnError
 
 	classifier := proxias.IntentClassifierFunc(
-		func(ctx context.Context, req proxias.ChatCompletionRequest, descriptors []proxias.WorkflowDescriptor) (proxias.Intent, error) {
+		func(ctx context.Context, req proxias.ChatCompletionRequest, descriptors []proxias.ActionDescriptor) (proxias.Intent, error) {
 			assert.Equal(t, expectedCtx, ctx)
 			assert.Equal(t, expectedReq, req)
 			assert.Equal(t, expectedDescriptors, descriptors)
@@ -134,13 +134,13 @@ func TestIntentIsReasoningIntent(t *testing.T) {
 			then:  assert.True,
 		},
 		{
-			name:  "GIVEN an intent with an empty list of workflow executions THEN should return true",
-			given: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{}},
+			name:  "GIVEN an intent with an empty list of action executions THEN should return true",
+			given: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{}},
 			then:  assert.True,
 		},
 		{
-			name:  "GIVEN an intent with a workflow execution THEN should return false",
-			given: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{someWorkflowExecutionIntent}},
+			name:  "GIVEN an intent with an action execution THEN should return false",
+			given: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{someActionExecutionIntent}},
 			then:  assert.False,
 		},
 	}

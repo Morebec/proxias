@@ -11,39 +11,39 @@ import (
 	"github.com/morebec/proxias/adapters/openai"
 )
 
-func TestWorkflowExecutionIntentSelectorSelect(t *testing.T) {
+func TestActionExecutionIntentSelectorSelect(t *testing.T) {
 	type expect struct {
-		descs []proxias.WorkflowDescriptor
+		descs []proxias.ActionDescriptor
 		err   assert.ErrorAssertionFunc
 	}
-	both := []proxias.WorkflowDescriptor{restartService, appVersion}
+	both := []proxias.ActionDescriptor{restartService, appVersion}
 	tests := []struct {
 		name  string
 		given string // the text the model writes
-		when  []proxias.WorkflowDescriptor
+		when  []proxias.ActionDescriptor
 		then  expect
 	}{
 		{
 			name:  "canonical",
-			given: `{"workflows":["restart_service"]}`,
+			given: `{"actions":["restart_service"]}`,
 			when:  both,
-			then:  expect{descs: []proxias.WorkflowDescriptor{restartService}, err: assert.NoError},
+			then:  expect{descs: []proxias.ActionDescriptor{restartService}, err: assert.NoError},
 		},
 		{
 			name:  "GIVEN the model lists them in another order THEN they keep the order they were given",
-			given: `{"workflows":["app_version","restart_service"]}`,
+			given: `{"actions":["app_version","restart_service"]}`,
 			when:  both,
 			then:  expect{descs: both, err: assert.NoError},
 		},
 		{
 			name:  "GIVEN an ID that was not offered THEN it is ignored",
-			given: `{"workflows":["rm_rf"]}`,
+			given: `{"actions":["rm_rf"]}`,
 			when:  both,
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN no workflow offered THEN the API is not called and nothing is selected",
-			given: `{"workflows":["restart_service"]}`,
+			name:  "GIVEN no action offered THEN the API is not called and nothing is selected",
+			given: `{"actions":["restart_service"]}`,
 			when:  nil,
 			then:  expect{err: assert.NoError},
 		},
@@ -51,7 +51,7 @@ func TestWorkflowExecutionIntentSelectorSelect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, got := mockOpenAI(t, http.StatusOK, answerWith(tt.given))
-			selector := openai.NewWorkflowExecutionIntentSelector(client, someModel)
+			selector := openai.NewActionExecutionIntentSelector(client, someModel)
 
 			selected, err := selector.Select(t.Context(), userSays("restart api"), tt.when)
 
@@ -64,13 +64,13 @@ func TestWorkflowExecutionIntentSelectorSelect(t *testing.T) {
 	}
 }
 
-func TestWorkflowExecutionIntentSelectorSelectSendsTheWorkflowsWithoutTheirSchemas(t *testing.T) {
+func TestActionExecutionIntentSelectorSelectSendsTheActionsWithoutTheirSchemas(t *testing.T) {
 	// Given
-	client, got := mockOpenAI(t, http.StatusOK, answerWith(`{"workflows":[]}`))
-	selector := openai.NewWorkflowExecutionIntentSelector(client, someModel)
+	client, got := mockOpenAI(t, http.StatusOK, answerWith(`{"actions":[]}`))
+	selector := openai.NewActionExecutionIntentSelector(client, someModel)
 
 	// When
-	_, err := selector.Select(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := selector.Select(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	require.NoError(t, err)
@@ -79,14 +79,14 @@ func TestWorkflowExecutionIntentSelectorSelectSendsTheWorkflowsWithoutTheirSchem
 	assert.NotContains(t, input, "schema", "the selector does not see the parameters")
 }
 
-func TestWorkflowExecutionIntentSelectorSelectReturnsTheAPIError(t *testing.T) {
+func TestActionExecutionIntentSelectorSelectReturnsTheAPIError(t *testing.T) {
 	// Given
 	client, _ := mockOpenAI(t, http.StatusInternalServerError, `{"error":{"type":"server_error","message":"down"}}`)
-	selector := openai.NewWorkflowExecutionIntentSelector(client, someModel)
+	selector := openai.NewActionExecutionIntentSelector(client, someModel)
 
 	// When
-	_, err := selector.Select(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := selector.Select(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
-	assert.ErrorContains(t, err, "openai: select workflows")
+	assert.ErrorContains(t, err, "openai: select actions")
 }

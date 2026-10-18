@@ -32,15 +32,15 @@ func NewReasoningEngine(client openaisdk.Client, model string) *ReasoningEngine 
 	return &ReasoningEngine{openaiHelper{client, model}}
 }
 
-// Reason implements proxias.ReasoningEngine. The workflows are told to the model in a system message, after the
+// Reason implements proxias.ReasoningEngine. The actions are told to the model in a system message, after the
 // harness's own ones. An error response of the provider is returned as a response, as it came: only a call that
 // got no response is an error.
-func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.ActionDescriptor) (proxias.ChatCompletionResponse, error) {
 	if e.model != "" {
 		req.Model = e.model
 	}
 	if len(descs) != 0 {
-		req.Messages = withSystemMessage(req.Messages, workflowsMessage(descs))
+		req.Messages = withSystemMessage(req.Messages, actionsMessage(descs))
 	}
 
 	// Into an *http.Response, the SDK hands the response over unread, so that a stream is forwarded as it comes.
@@ -61,12 +61,12 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 	return proxias.ChatCompletionResponse{Status: resp.StatusCode, Header: header, Body: resp.Body}, nil
 }
 
-// workflowsMessage tells the model what the application can do by running workflows, so that it answers a
-// question about its capabilities accurately. The workflows are listed by name and description: their schemas are
+// actionsMessage tells the model what the application can do by running actions, so that it answers a
+// question about its capabilities accurately. The actions are listed by name and description: their schemas are
 // for the classifier, not for the reasoning.
-func workflowsMessage(descs []proxias.WorkflowDescriptor) string {
-	prompt := proxias.NewPrompt().AddSection("Workflows",
-		"The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:")
+func actionsMessage(descs []proxias.ActionDescriptor) string {
+	prompt := proxias.NewPrompt().AddSection("Actions",
+		"The application also runs these actions for the requests that ask for them. When asked what the application can do, describe them:")
 	for _, d := range descs {
 		prompt.AddLabeledBulletPoint(d.Name, d.Description)
 	}

@@ -30,19 +30,19 @@ func NewReasoningEngine(client anthropicsdk.Client, model anthropicsdk.Model) *R
 	return e
 }
 
-// Reason implements proxias.ReasoningEngine. The workflow descriptors are not used.
+// Reason implements proxias.ReasoningEngine. The action descriptors are not used.
 //
 // The answer is streamed if req.Stream is set. An error response of the API is returned as a response, as
 // transparent as it can be (see mapErrorResponse), even for a stream: the first event is read before the
 // response is. Only a call that got no response is an error.
-func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.ActionDescriptor) (proxias.ChatCompletionResponse, error) {
 	params, err := mapChatCompletionRequestToMessageParams(req, e.model)
 	if err != nil {
 		return proxias.ChatCompletionResponse{}, fmt.Errorf("anthropic: map the request: %w", err)
 	}
 	if len(descs) != 0 {
 		// After the harness's own system blocks, so that the prefix of the harness's prompt stays cached.
-		params.System = append(params.System, workflowsBlock(descs))
+		params.System = append(params.System, actionsBlock(descs))
 	}
 
 	if !req.Stream {
@@ -71,12 +71,12 @@ func (e *ReasoningEngine) Reason(ctx context.Context, req proxias.ChatCompletion
 	return proxias.NewChatCompletionStream(mapChunks(stream, req.UsageRequested())), nil
 }
 
-// workflowsBlock tells the model what the application can do by running workflows, so that it answers a question
-// about its capabilities accurately. The workflows are listed by name and description: their schemas are for the
+// actionsBlock tells the model what the application can do by running actions, so that it answers a question
+// about its capabilities accurately. The actions are listed by name and description: their schemas are for the
 // classifier, not for the reasoning.
-func workflowsBlock(descs []proxias.WorkflowDescriptor) anthropicsdk.TextBlockParam {
-	prompt := proxias.NewPrompt().AddSection("Workflows",
-		"The application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:")
+func actionsBlock(descs []proxias.ActionDescriptor) anthropicsdk.TextBlockParam {
+	prompt := proxias.NewPrompt().AddSection("Actions",
+		"The application also runs these actions for the requests that ask for them. When asked what the application can do, describe them:")
 	for _, d := range descs {
 		prompt.AddLabeledBulletPoint(d.Name, d.Description)
 	}

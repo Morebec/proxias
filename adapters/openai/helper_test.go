@@ -20,13 +20,13 @@ import (
 const someModel = "some-model"
 
 var (
-	restartService = proxias.WorkflowDescriptor{
+	restartService = proxias.ActionDescriptor{
 		ID:          "restart_service",
 		Name:        "Restart a service",
 		Description: "Restarts a service",
 		InputSchema: map[string]any{"type": "object", "required": []any{"service"}},
 	}
-	appVersion = proxias.WorkflowDescriptor{ID: "app_version", Name: "App version", Description: "Tells the running version"}
+	appVersion = proxias.ActionDescriptor{ID: "app_version", Name: "App version", Description: "Tells the running version"}
 )
 
 // sent is what the mock received: the path and the body of the last request.

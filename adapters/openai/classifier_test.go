@@ -31,28 +31,28 @@ func TestIntentClassifierClassify(t *testing.T) {
 		intent proxias.Intent
 		err    assert.ErrorAssertionFunc
 	}
-	both := []proxias.WorkflowDescriptor{restartService, appVersion}
-	restart := proxias.WorkflowExecutionIntent{WorkflowID: "restart_service", Params: map[string]any{"service": "api"}}
+	both := []proxias.ActionDescriptor{restartService, appVersion}
+	restart := proxias.ActionExecutionIntent{ActionID: "restart_service", Params: map[string]any{"service": "api"}}
 	tests := []struct {
 		name  string
 		given string // the text the model writes
-		when  []proxias.WorkflowDescriptor
+		when  []proxias.ActionDescriptor
 		then  expect
 	}{
 		{
 			name:  "canonical",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]}`,
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}}]}`,
 			when:  both,
-			then:  expect{intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{restart}}, err: assert.NoError},
+			then:  expect{intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{restart}}, err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow asked for several times THEN each is an execution, in order",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}},{"workflow_id":"restart_service","params":{"service":"db"}}]}`,
+			name:  "GIVEN an action asked for several times THEN each is an execution, in order",
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}},{"action_id":"restart_service","params":{"service":"db"}}]}`,
 			when:  both,
 			then: expect{
-				intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{
+				intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{
 					restart,
-					{WorkflowID: "restart_service", Params: map[string]any{"service": "db"}},
+					{ActionID: "restart_service", Params: map[string]any{"service": "db"}},
 				}},
 				err: assert.NoError,
 			},
@@ -64,13 +64,13 @@ func TestIntentClassifierClassify(t *testing.T) {
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow that was not offered THEN it is dropped",
-			given: `{"executions":[{"workflow_id":"rm_rf"}]}`,
+			name:  "GIVEN an action that was not offered THEN it is dropped",
+			given: `{"executions":[{"action_id":"rm_rf"}]}`,
 			when:  both,
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN no workflow THEN the API is not called and the intent is a reasoning intent",
+			name:  "GIVEN no action THEN the API is not called and the intent is a reasoning intent",
 			given: `{"executions":[]}`,
 			when:  nil,
 			then:  expect{err: assert.NoError},
@@ -92,7 +92,7 @@ func TestIntentClassifierClassify(t *testing.T) {
 	}
 }
 
-func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *testing.T) {
+func TestIntentClassifierClassifySendsTheConversationAndTheActionsAsJSON(t *testing.T) {
 	// Given
 	client, got := mockOpenAI(t, http.StatusOK, answerWith(`{"executions":[]}`))
 	classifier := openai.NewIntentClassifier(client, someModel)
@@ -104,16 +104,16 @@ func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *te
 	}}
 
 	// When
-	_, err := classifier.Classify(t.Context(), req, []proxias.WorkflowDescriptor{restartService})
+	_, err := classifier.Classify(t.Context(), req, []proxias.ActionDescriptor{restartService})
 
 	// Then
 	require.NoError(t, err)
 	input := sentInput(t, got)
 	var decoded struct {
-		Workflows []proxias.WorkflowDescriptor `json:"workflows"`
+		Actions []proxias.ActionDescriptor `json:"actions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(input), &decoded))
-	assert.Equal(t, []proxias.WorkflowDescriptor{restartService}, decoded.Workflows)
+	assert.Equal(t, []proxias.ActionDescriptor{restartService}, decoded.Actions)
 	assert.Contains(t, input, `{"role":"system","content":"We run a hosting company"}`)
 	assert.Contains(t, input, `{"role":"assistant","content":"done"}`)
 	assert.NotContains(t, input, `"content":""`, "a message without text is left out")
@@ -125,7 +125,7 @@ func TestIntentClassifierClassifyReturnsTheAPIError(t *testing.T) {
 	classifier := openai.NewIntentClassifier(client, someModel)
 
 	// When
-	_, err := classifier.Classify(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := classifier.Classify(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	var apiErr *openaisdk.Error

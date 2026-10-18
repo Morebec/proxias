@@ -14,13 +14,13 @@ import (
 	"github.com/morebec/proxias/adapters/openai"
 )
 
-var restartedSynthesis = proxias.WorkflowExecutionSynthesis{
+var restartedSynthesis = proxias.ActionExecutionSynthesis{
 	Request:          userSays("restart the api"),
-	Intent:           proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: "restart_service", Params: map[string]any{"service": "api"}}}},
-	ExecutionResults: []proxias.WorkflowExecutionResult{{WorkflowID: "restart_service", Status: "completed", Data: map[string]any{"took": "2s"}}},
+	Intent:           proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{{ActionID: "restart_service", Params: map[string]any{"service": "api"}}}},
+	ExecutionResults: []proxias.ActionExecutionResult{{ActionID: "restart_service", Status: "completed", Data: map[string]any{"took": "2s"}}},
 }
 
-func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesize(t *testing.T) {
 	tests := []struct {
 		name  string
 		given string // the text the model writes
@@ -40,7 +40,7 @@ func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := mockOpenAI(t, http.StatusOK, answerWith(tt.given))
-			synthesizer := openai.NewWorkflowExecutionSynthesizer(client, someModel)
+			synthesizer := openai.NewActionExecutionSynthesizer(client, someModel)
 
 			resp, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)
 
@@ -58,10 +58,10 @@ func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
 	}
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *testing.T) {
 	// Given a request that streams
 	client, _ := mockOpenAI(t, http.StatusOK, answerWith("The api restarted."))
-	synthesizer := openai.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := openai.NewActionExecutionSynthesizer(client, someModel)
 	synthesis := restartedSynthesis
 	synthesis.Request.Stream = true
 
@@ -77,10 +77,10 @@ func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *te
 	assert.Contains(t, string(body), `"content":"The api restarted."`)
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults(t *testing.T) {
 	// Given
 	client, got := mockOpenAI(t, http.StatusOK, answerWith("ok"))
-	synthesizer := openai.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := openai.NewActionExecutionSynthesizer(client, someModel)
 
 	// When
 	resp, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)
@@ -90,14 +90,14 @@ func TestWorkflowExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults
 	_ = resp.Body.Close()
 	input := sentInput(t, got)
 	assert.Contains(t, input, `{"role":"user","content":"restart the api"}`)
-	assert.Contains(t, input, `"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]`)
+	assert.Contains(t, input, `"executions":[{"action_id":"restart_service","params":{"service":"api"}}]`)
 	assert.Contains(t, input, `"data":{"took":"2s"}`)
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeReturnsTheAPIError(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeReturnsTheAPIError(t *testing.T) {
 	// Given
 	client, _ := mockOpenAI(t, http.StatusTooManyRequests, `{"error":{"type":"rate_limit_error","message":"slow down"}}`)
-	synthesizer := openai.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := openai.NewActionExecutionSynthesizer(client, someModel)
 
 	// When
 	_, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)

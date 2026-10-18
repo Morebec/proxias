@@ -125,21 +125,21 @@ func TestReasoningEngineReasonFailsWhenTheProviderCannotBeReached(t *testing.T) 
 	assert.ErrorContains(t, err, "openai: ")
 }
 
-func TestReasoningEngineReasonTellsTheModelTheWorkflows(t *testing.T) {
+func TestReasoningEngineReasonTellsTheModelTheActions(t *testing.T) {
 	system := proxias.ChatMessage{Role: proxias.ChatMessageRoleSystem, Content: text("be brief")}
 	user := proxias.ChatMessage{Role: proxias.ChatMessageRoleUser, Content: text("what can you do?")}
 	tests := []struct {
 		name  string
-		given []proxias.WorkflowDescriptor
+		given []proxias.ActionDescriptor
 		then  []string // the roles of the messages sent
 	}{
 		{
-			name:  "GIVEN workflows THEN a system message tells them, after the harness's own",
-			given: []proxias.WorkflowDescriptor{restartService},
+			name:  "GIVEN actions THEN a system message tells them, after the harness's own",
+			given: []proxias.ActionDescriptor{restartService},
 			then:  []string{"system", "system", "user"},
 		},
 		{
-			name:  "GIVEN no workflow THEN no message is added",
+			name:  "GIVEN no action THEN no message is added",
 			given: nil,
 			then:  []string{"system", "user"},
 		},
@@ -167,7 +167,7 @@ func TestReasoningEngineReasonTellsTheModelTheWorkflows(t *testing.T) {
 			}
 			assert.Equal(t, tt.then, roles)
 			if len(tt.given) > 0 {
-				assert.Equal(t, "## Workflows\nThe application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service", body.Messages[1].Content)
+				assert.Equal(t, "## Actions\nThe application also runs these actions for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service", body.Messages[1].Content)
 			}
 			assert.Len(t, req.Messages, 2, "the caller's messages are not edited")
 		})

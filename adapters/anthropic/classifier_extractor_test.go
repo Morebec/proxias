@@ -12,11 +12,11 @@ import (
 	"github.com/morebec/proxias/adapters/anthropic"
 )
 
-var restartIntent = proxias.WorkflowExecutionIntent{WorkflowID: "restart_service", Params: map[string]any{"service": "api"}}
+var restartIntent = proxias.ActionExecutionIntent{ActionID: "restart_service", Params: map[string]any{"service": "api"}}
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParameters(t *testing.T) {
 	type expect struct {
-		executions []proxias.WorkflowExecutionIntent
+		executions []proxias.ActionExecutionIntent
 		err        assert.ErrorAssertionFunc
 	}
 	tests := []struct {
@@ -26,17 +26,17 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T
 	}{
 		{
 			name:  "canonical",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]}`,
-			then:  expect{executions: []proxias.WorkflowExecutionIntent{restartIntent}, err: assert.NoError},
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}}]}`,
+			then:  expect{executions: []proxias.ActionExecutionIntent{restartIntent}, err: assert.NoError},
 		},
 		{
 			name:  "GIVEN a parameter that the conversation does not give THEN it is left out",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{}}]}`,
-			then:  expect{executions: []proxias.WorkflowExecutionIntent{{WorkflowID: "restart_service", Params: map[string]any{}}}, err: assert.NoError},
+			given: `{"executions":[{"action_id":"restart_service","params":{}}]}`,
+			then:  expect{executions: []proxias.ActionExecutionIntent{{ActionID: "restart_service", Params: map[string]any{}}}, err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow that was not matched THEN it is dropped",
-			given: `{"executions":[{"workflow_id":"app_version"}]}`,
+			name:  "GIVEN an action that was not matched THEN it is dropped",
+			given: `{"executions":[{"action_id":"app_version"}]}`,
 			then:  expect{err: assert.NoError},
 		},
 		{
@@ -48,9 +48,9 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := mockAnthropic(t, 200, answerWith(tt.given))
-			extractor := anthropic.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+			extractor := anthropic.NewActionExecutionIntentParameterExtractor(client, someModel)
 
-			got, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+			got, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 			tt.then.err(t, err)
 			assert.Equal(t, tt.then.executions, got)
@@ -58,13 +58,13 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParameters(t *testing.T
 	}
 }
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParametersSendsTheSchemas(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParametersSendsTheSchemas(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith(`{"executions":[]}`))
-	extractor := anthropic.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+	extractor := anthropic.NewActionExecutionIntentParameterExtractor(client, someModel)
 
 	// When
-	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	require.NoError(t, err)
@@ -84,12 +84,12 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParametersSendsTheSchem
 	assert.Contains(t, user, `"schema":{"required":["service"],"type":"object"}`, "the extractor sees the parameters")
 }
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParametersWithoutDescriptorsDoesNotCallTheAPI(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParametersWithoutDescriptorsDoesNotCallTheAPI(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith(`{"executions":[]}`))
 
 	// When
-	got, err := anthropic.NewWorkflowExecutionIntentParameterExtractor(client, someModel).ExtractParameters(t.Context(), userSays("restart api"), nil)
+	got, err := anthropic.NewActionExecutionIntentParameterExtractor(client, someModel).ExtractParameters(t.Context(), userSays("restart api"), nil)
 
 	// Then
 	require.NoError(t, err)
@@ -97,13 +97,13 @@ func TestWorkflowExecutionIntentParameterExtractorExtractParametersWithoutDescri
 	assert.Empty(t, *sent)
 }
 
-func TestWorkflowExecutionIntentParameterExtractorExtractParametersReturnsTheAPIError(t *testing.T) {
+func TestActionExecutionIntentParameterExtractorExtractParametersReturnsTheAPIError(t *testing.T) {
 	// Given
 	client, _ := mockAnthropic(t, 429, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)
-	extractor := anthropic.NewWorkflowExecutionIntentParameterExtractor(client, someModel)
+	extractor := anthropic.NewActionExecutionIntentParameterExtractor(client, someModel)
 
 	// When
-	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := extractor.ExtractParameters(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	var apiErr *anthropicsdk.Error

@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	restartService = proxias.WorkflowDescriptor{
+	restartService = proxias.ActionDescriptor{
 		ID:          "restart_service",
 		Name:        "Restart a service",
 		Description: "Restarts a service",
 		InputSchema: map[string]any{"type": "object", "required": []any{"service"}},
 	}
-	appVersion = proxias.WorkflowDescriptor{ID: "app_version", Name: "App version", Description: "Tells the running version"}
+	appVersion = proxias.ActionDescriptor{ID: "app_version", Name: "App version", Description: "Tells the running version"}
 )
 
 // answerWith is the API's answer to a message, in which the model wrote text.
@@ -33,37 +33,37 @@ func TestIntentClassifierClassify(t *testing.T) {
 		intent proxias.Intent
 		err    assert.ErrorAssertionFunc
 	}
-	both := []proxias.WorkflowDescriptor{restartService, appVersion}
-	restart := proxias.WorkflowExecutionIntent{WorkflowID: "restart_service", Params: map[string]any{"service": "api"}}
+	both := []proxias.ActionDescriptor{restartService, appVersion}
+	restart := proxias.ActionExecutionIntent{ActionID: "restart_service", Params: map[string]any{"service": "api"}}
 	tests := []struct {
 		name  string
 		given string // the text the model writes
-		when  []proxias.WorkflowDescriptor
+		when  []proxias.ActionDescriptor
 		then  expect
 	}{
 		{
 			name:  "canonical",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]}`,
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}}]}`,
 			when:  both,
-			then:  expect{intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{restart}}, err: assert.NoError},
+			then:  expect{intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{restart}}, err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow asked for several times THEN each is an execution, in order",
-			given: `{"executions":[{"workflow_id":"restart_service","params":{"service":"api"}},{"workflow_id":"restart_service","params":{"service":"db"}}]}`,
+			name:  "GIVEN an action asked for several times THEN each is an execution, in order",
+			given: `{"executions":[{"action_id":"restart_service","params":{"service":"api"}},{"action_id":"restart_service","params":{"service":"db"}}]}`,
 			when:  both,
 			then: expect{
-				intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{
+				intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{
 					restart,
-					{WorkflowID: "restart_service", Params: map[string]any{"service": "db"}},
+					{ActionID: "restart_service", Params: map[string]any{"service": "db"}},
 				}},
 				err: assert.NoError,
 			},
 		},
 		{
-			name:  "GIVEN a workflow without parameters THEN its params are nil",
-			given: `{"executions":[{"workflow_id":"app_version"}]}`,
+			name:  "GIVEN an action without parameters THEN its params are nil",
+			given: `{"executions":[{"action_id":"app_version"}]}`,
 			when:  both,
-			then:  expect{intent: proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{{WorkflowID: "app_version"}}}, err: assert.NoError},
+			then:  expect{intent: proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{{ActionID: "app_version"}}}, err: assert.NoError},
 		},
 		{
 			name:  "GIVEN no execution THEN the intent is a reasoning intent",
@@ -72,13 +72,13 @@ func TestIntentClassifierClassify(t *testing.T) {
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN a workflow that was not offered THEN it is dropped",
-			given: `{"executions":[{"workflow_id":"rm_rf"}]}`,
+			name:  "GIVEN an action that was not offered THEN it is dropped",
+			given: `{"executions":[{"action_id":"rm_rf"}]}`,
 			when:  both,
 			then:  expect{err: assert.NoError},
 		},
 		{
-			name:  "GIVEN no workflow THEN the API is not called and the intent is a reasoning intent",
+			name:  "GIVEN no action THEN the API is not called and the intent is a reasoning intent",
 			given: `{"executions":[]}`,
 			when:  nil,
 			then:  expect{err: assert.NoError},
@@ -100,7 +100,7 @@ func TestIntentClassifierClassify(t *testing.T) {
 	}
 }
 
-func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *testing.T) {
+func TestIntentClassifierClassifySendsTheConversationAndTheActionsAsJSON(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith(`{"executions":[]}`))
 	classifier := anthropic.NewIntentClassifier(client, someModel)
@@ -112,7 +112,7 @@ func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *te
 	}}
 
 	// When
-	_, err := classifier.Classify(t.Context(), req, []proxias.WorkflowDescriptor{restartService})
+	_, err := classifier.Classify(t.Context(), req, []proxias.ActionDescriptor{restartService})
 
 	// Then
 	require.NoError(t, err)
@@ -126,10 +126,10 @@ func TestIntentClassifierClassifySendsTheConversationAndTheWorkflowsAsJSON(t *te
 	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
 	require.Len(t, call.Messages, 1)
 	var input struct {
-		Workflows []proxias.WorkflowDescriptor `json:"workflows"`
+		Actions []proxias.ActionDescriptor `json:"actions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(call.Messages[0].Content[0].Text), &input))
-	assert.Equal(t, []proxias.WorkflowDescriptor{restartService}, input.Workflows)
+	assert.Equal(t, []proxias.ActionDescriptor{restartService}, input.Actions)
 	assert.Contains(t, call.Messages[0].Content[0].Text, `{"role":"system","content":"We run a hosting company"}`)
 	assert.Contains(t, call.Messages[0].Content[0].Text, `{"role":"assistant","content":"done"}`)
 	assert.NotContains(t, call.Messages[0].Content[0].Text, `"content":""`, "a message without text is left out")
@@ -141,7 +141,7 @@ func TestIntentClassifierClassifyReturnsTheAPIError(t *testing.T) {
 	classifier := anthropic.NewIntentClassifier(client, someModel)
 
 	// When
-	_, err := classifier.Classify(t.Context(), userSays("restart api"), []proxias.WorkflowDescriptor{restartService})
+	_, err := classifier.Classify(t.Context(), userSays("restart api"), []proxias.ActionDescriptor{restartService})
 
 	// Then
 	var apiErr *anthropicsdk.Error

@@ -2,7 +2,7 @@
 // endpoint, so that a real harness (OpenClaw, see `task sandbox:openclaw`) can talk to it. To try a middleware,
 // change buildControlPlane and restart `task sandbox`.
 //
-// Claude is the classifier, the synthesizer and the reasoning engine, and the workflow is say_hello_world. The
+// Claude is the classifier, the synthesizer and the reasoning engine, and the action is say_hello_world. The
 // sandbox needs ANTHROPIC_API_KEY, from the environment or from a .env file in the working directory (see
 // .env.example): the environment wins over the file.
 package main
@@ -68,10 +68,10 @@ func buildControlPlane() (proxias.ControlPlane, error) {
 	client := anthropicsdk.NewClient(option.WithAPIKey(key))
 
 	classifier := anthropic.NewIntentClassifier(client, anthropicsdk.ModelClaudeHaiku4_5)
-	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, anthropicsdk.ModelClaudeHaiku4_5)
-	workflowEngine := workflowEngine{}
+	synthesizer := anthropic.NewActionExecutionSynthesizer(client, anthropicsdk.ModelClaudeHaiku4_5)
+	actionEngine := actionEngine{}
 
-	interception, err := proxias.NewWorkflowInterceptionMiddleware(classifier, workflowEngine, synthesizer)
+	interception, err := proxias.NewActionInterceptionMiddleware(classifier, actionEngine, synthesizer)
 	if err != nil {
 		return nil, err
 	}
@@ -130,17 +130,17 @@ func logRequests() proxias.Middleware {
 	}
 }
 
-// workflowEngine is the WorkflowExecutionEngine of the sandbox: one workflow.
-type workflowEngine struct{}
+// actionEngine is the ActionExecutionEngine of the sandbox: one action.
+type actionEngine struct{}
 
-func (workflowEngine) WorkflowDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.WorkflowDescriptor, error) {
-	return []proxias.WorkflowDescriptor{{ID: "say_hello_world", Name: "Say hello world", Description: "Says hello to the world"}}, nil
+func (actionEngine) ActionDescriptors(context.Context, proxias.ChatCompletionRequest) ([]proxias.ActionDescriptor, error) {
+	return []proxias.ActionDescriptor{{ID: "say_hello_world", Name: "Say hello world", Description: "Says hello to the world"}}, nil
 }
 
-func (workflowEngine) ExecuteWorkflows(_ context.Context, _ proxias.ChatCompletionRequest, executions []proxias.WorkflowExecutionIntent) ([]proxias.WorkflowExecutionResult, error) {
-	results := make([]proxias.WorkflowExecutionResult, 0, len(executions))
+func (actionEngine) ExecuteActions(_ context.Context, _ proxias.ChatCompletionRequest, executions []proxias.ActionExecutionIntent) ([]proxias.ActionExecutionResult, error) {
+	results := make([]proxias.ActionExecutionResult, 0, len(executions))
 	for _, execution := range executions {
-		results = append(results, proxias.WorkflowExecutionResult{WorkflowID: execution.WorkflowID, Status: "completed", Data: map[string]any{"message": "Hello, World!"}})
+		results = append(results, proxias.ActionExecutionResult{ActionID: execution.ActionID, Status: "completed", Data: map[string]any{"message": "Hello, World!"}})
 	}
 	return results, nil
 }

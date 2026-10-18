@@ -15,15 +15,15 @@ import (
 	"github.com/morebec/proxias/adapters/anthropic"
 )
 
-var restartedSynthesis = proxias.WorkflowExecutionSynthesis{
+var restartedSynthesis = proxias.ActionExecutionSynthesis{
 	Request: userSays("restart api"),
-	Intent:  proxias.Intent{WorkflowExecutions: []proxias.WorkflowExecutionIntent{restartIntent}},
-	ExecutionResults: []proxias.WorkflowExecutionResult{
-		{WorkflowID: "restart_service", Status: "completed", Data: map[string]any{"restarted": true}},
+	Intent:  proxias.Intent{ActionExecutions: []proxias.ActionExecutionIntent{restartIntent}},
+	ExecutionResults: []proxias.ActionExecutionResult{
+		{ActionID: "restart_service", Status: "completed", Data: map[string]any{"restarted": true}},
 	},
 }
 
-func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesize(t *testing.T) {
 	type expect struct {
 		body string // the chat completion, its created time zeroed
 		err  assert.ErrorAssertionFunc
@@ -51,7 +51,7 @@ func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := mockAnthropic(t, 200, answerWith(tt.given))
-			synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, someModel)
+			synthesizer := anthropic.NewActionExecutionSynthesizer(client, someModel)
 
 			got, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)
 
@@ -74,10 +74,10 @@ func TestWorkflowExecutionSynthesizerSynthesize(t *testing.T) {
 	}
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *testing.T) {
 	// Given a request that asks for the usage in the stream
 	client, _ := mockAnthropic(t, 200, answerWith("The api restarted."))
-	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := anthropic.NewActionExecutionSynthesizer(client, someModel)
 	synthesis := restartedSynthesis
 	synthesis.Request.Stream = true
 	synthesis.Request.StreamOptions = &proxias.ChatStreamOptions{IncludeUsage: true}
@@ -99,10 +99,10 @@ func TestWorkflowExecutionSynthesizerSynthesizeStreamsTheReplyWhenAskedFor(t *te
 	assert.Equal(t, "data: [DONE]", events[3])
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith("ok"))
-	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := anthropic.NewActionExecutionSynthesizer(client, someModel)
 
 	// When
 	_, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)
@@ -123,14 +123,14 @@ func TestWorkflowExecutionSynthesizerSynthesizeSendsTheConversationAndTheResults
 	assert.Equal(t, "ephemeral", call.System[0].CacheControl["type"], "the instructions never vary: they can be cached")
 	user := call.Messages[0].Content[0].Text
 	assert.Contains(t, user, `{"role":"user","content":"restart api"}`)
-	assert.Contains(t, user, `"executions":[{"workflow_id":"restart_service","params":{"service":"api"}}]`)
-	assert.Contains(t, user, `"results":[{"workflow_id":"restart_service","status":"completed","data":{"restarted":true}}]`)
+	assert.Contains(t, user, `"executions":[{"action_id":"restart_service","params":{"service":"api"}}]`)
+	assert.Contains(t, user, `"results":[{"action_id":"restart_service","status":"completed","data":{"restarted":true}}]`)
 }
 
-func TestWorkflowExecutionSynthesizerSynthesizeReturnsTheAPIError(t *testing.T) {
+func TestActionExecutionSynthesizerSynthesizeReturnsTheAPIError(t *testing.T) {
 	// Given
 	client, _ := mockAnthropic(t, 500, `{"type":"error","error":{"type":"api_error","message":"down"}}`)
-	synthesizer := anthropic.NewWorkflowExecutionSynthesizer(client, someModel)
+	synthesizer := anthropic.NewActionExecutionSynthesizer(client, someModel)
 
 	// When
 	_, err := synthesizer.Synthesize(t.Context(), restartedSynthesis)
