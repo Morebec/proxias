@@ -38,9 +38,9 @@ Follow them.
 		{
 			name: "GIVEN a section without content THEN it is its title",
 			given: func() *proxias.Prompt {
-				return proxias.NewPrompt().AddSection("Workflows", "")
+				return proxias.NewPrompt().AddSection("Actions", "")
 			},
-			then: "## Workflows",
+			then: "## Actions",
 		},
 		{
 			name: "GIVEN two sections THEN a blank line separates them",

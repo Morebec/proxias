@@ -11,13 +11,13 @@ import (
 )
 
 func mockReasoningEngine(resp proxias.ChatCompletionResponse, err error) proxias.ReasoningEngine {
-	return proxias.ReasoningEngineFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+	return proxias.ReasoningEngineFunc(func(context.Context, proxias.ChatCompletionRequest, []proxias.ActionDescriptor) (proxias.ChatCompletionResponse, error) {
 		return resp, err
 	})
 }
 
-func recordingReasoningEngine(recordedReq *proxias.ChatCompletionRequest, recordedDescs *[]proxias.WorkflowDescriptor) proxias.ReasoningEngine {
-	return proxias.ReasoningEngineFunc(func(_ context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+func recordingReasoningEngine(recordedReq *proxias.ChatCompletionRequest, recordedDescs *[]proxias.ActionDescriptor) proxias.ReasoningEngine {
+	return proxias.ReasoningEngineFunc(func(_ context.Context, req proxias.ChatCompletionRequest, descs []proxias.ActionDescriptor) (proxias.ChatCompletionResponse, error) {
 		*recordedReq = req
 		*recordedDescs = descs
 		return someResponse, nil
@@ -26,8 +26,8 @@ func recordingReasoningEngine(recordedReq *proxias.ChatCompletionRequest, record
 
 func TestReasoningEngineFunc(t *testing.T) {
 	// GIVEN
-	expectedDescs := []proxias.WorkflowDescriptor{
-		{Name: "SomeWorkflow"},
+	expectedDescs := []proxias.ActionDescriptor{
+		{Name: "SomeAction"},
 	}
 	expectedContext := t.Context()
 	expectedReq := proxias.ChatCompletionRequest{Model: "some_model"}
@@ -36,7 +36,7 @@ func TestReasoningEngineFunc(t *testing.T) {
 		Status: 10,
 	}
 
-	reasoningEngine := proxias.ReasoningEngineFunc(func(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.WorkflowDescriptor) (proxias.ChatCompletionResponse, error) {
+	reasoningEngine := proxias.ReasoningEngineFunc(func(ctx context.Context, req proxias.ChatCompletionRequest, descs []proxias.ActionDescriptor) (proxias.ChatCompletionResponse, error) {
 		assert.Equal(t, expectedContext, ctx)
 		assert.Equal(t, expectedReq, req)
 		assert.Equal(t, expectedDescs, descs)
@@ -85,10 +85,10 @@ func TestNewReasoningMiddleware(t *testing.T) {
 func TestReasoningMiddlewareGivesTheEngineTheRequestAndTheDescriptorsOfTheContext(t *testing.T) {
 	// Given
 	var recordedReq proxias.ChatCompletionRequest
-	var recordedDescs []proxias.WorkflowDescriptor
+	var recordedDescs []proxias.ActionDescriptor
 	middleware, err := proxias.NewReasoningMiddleware(recordingReasoningEngine(&recordedReq, &recordedDescs))
 	require.NoError(t, err)
-	ctx := proxias.WithWorkflowDescriptors(t.Context(), []proxias.WorkflowDescriptor{someWorkflowDescriptor})
+	ctx := proxias.WithActionDescriptors(t.Context(), []proxias.ActionDescriptor{someActionDescriptor})
 
 	// When it ends the chain
 	got, err := middleware(nil)(ctx, someRequest)
@@ -97,7 +97,7 @@ func TestReasoningMiddlewareGivesTheEngineTheRequestAndTheDescriptorsOfTheContex
 	require.NoError(t, err)
 	assert.Equal(t, someResponse, got)
 	assert.Equal(t, someRequest, recordedReq)
-	assert.Equal(t, []proxias.WorkflowDescriptor{someWorkflowDescriptor}, recordedDescs)
+	assert.Equal(t, []proxias.ActionDescriptor{someActionDescriptor}, recordedDescs)
 }
 
 func TestReasoningMiddlewareWrapsTheEnginesError(t *testing.T) {

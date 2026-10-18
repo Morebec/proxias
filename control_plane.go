@@ -7,12 +7,12 @@ import (
 )
 
 // ControlPlane answers a request by running it through a chain of Middleware: the first step that answers it
-// bypasses the rest. A chain of a WorkflowInterceptionMiddleware, which runs the workflows a request asks for,
+// bypasses the rest. A chain of an ActionInterceptionMiddleware, which runs the actions a request asks for,
 // and then a ReasoningMiddleware, which answers the rest, is the usual one.
 type ControlPlane interface {
 	// Process answers req. An error is an infrastructure failure of one of the steps, or of the context: a
-	// workflow that cannot run for a reason the user should hear of is not an error, it is a
-	// WorkflowExecutionResult for the synthesizer.
+	// action that cannot run for a reason the user should hear of is not an error, it is a
+	// ActionExecutionResult for the synthesizer.
 	//
 	// An error of a step is wrapped with the proxias: prefix, once, here: the steps' own errors carry only
 	// their stage. A context error is returned as is.

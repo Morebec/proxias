@@ -17,7 +17,7 @@
 
 Proxias sits between a harness and its LLM. It speaks the OpenAI chat completions API, recognizes the requests that your own code can answer, runs that code directly, and asks the model only to put the result into words. Everything else goes to the LLM, as it would without Proxias.
 
-**The model selects and fills in a workflow; it never orchestrates one.**
+**The model selects and fills in an action; it never orchestrates one.**
 
 ## Why
 
@@ -36,18 +36,18 @@ That is three calls, each larger than the last, and on every run the model decid
 
 With Proxias, the same request goes like this:
 
-1. a fast **System-1** step picks `billing.create_invoice` from the workflows' names and descriptions;
-2. a small model fills in the customer and the period, seeing only that workflow's schema;
+1. a fast **System-1** step picks `billing.create_invoice` from the actions' names and descriptions;
+2. a small model fills in the customer and the period, seeing only that action's schema;
 3. your engine validates them and runs the fixed steps: find the customer, create the invoice, send it;
 4. a small model puts the result into words.
 
 ```mermaid
 flowchart TD
     request(["Request from the harness"])
-    select["<b>Pick the workflows</b><br/>System-1 classifier<br/>sees only IDs, names, descriptions"]
-    match{"Workflow<br/>asked for?"}
+    select["<b>Pick the actions</b><br/>System-1 classifier<br/>sees only IDs, names, descriptions"]
+    match{"Action<br/>asked for?"}
     extract["<b>Fill in parameters</b><br/>small model<br/>sees only the chosen schemas"]
-    run["<b>Run the workflows</b><br/>your WorkflowExecutionEngine<br/>validation, permissions, fixed steps:<br/>the only side effects"]
+    run["<b>Run the actions</b><br/>your ActionExecutionEngine<br/>validation, permissions, fixed steps:<br/>the only side effects"]
     synth["<b>Synthesize the result</b><br/>small model or templates<br/>sees only the structured results"]
     reason["<b>Reasoning</b><br/>the LLM, as without Proxias"]
     reply(["Reply to the harness"])
@@ -64,18 +64,18 @@ Only the engine changes anything; every other step is one narrow decision. What 
 
 - **Fewer tokens.** Selection sees the catalogue's names and descriptions, extraction one schema, synthesis one result: no growing tool loop. How much is saved depends on your catalogue and traffic, so measure it.
 - **Deterministic execution.** The steps are compiled, tested Go: the same inputs give the same side effects.
-- **A bounded action space.** The model cannot do anything the workflows do not expose, which also narrows what a prompt injection can reach. Reads are workflows too, under the same controls as writes.
+- **A bounded action space.** The model cannot do anything the actions do not expose, which also narrows what a prompt injection can reach. Reads are actions too, under the same controls as writes.
 - **One place for control.** Validation, permissions, approvals and audit live in your engine and in middleware, not in a prompt.
 - **Debuggable by stage.** The choice, the parameters, the run and the reply are separate, and each can be logged and tested on its own.
 
-The authority to define a process stays with whoever writes the workflow, and the user's choices stay with the user.
+The authority to define a process stays with whoever writes the action, and the user's choices stay with the user.
 
 ## Features
 
-- **Deterministic execution.** A classifier (local rules, a small model) maps a request to registered workflows; Proxias runs them directly. No tool loop, no model choosing what runs.
-- **Only what each step needs.** A composite classifier lets the parameter extractor see only the selected workflows' descriptors: fewer tokens, a narrower injection surface, and each step can be a small, cheap model.
+- **Deterministic execution.** A classifier (local rules, a small model) maps a request to registered actions; Proxias runs them directly. No tool loop, no model choosing what runs.
+- **Only what each step needs.** A composite classifier lets the parameter extractor see only the selected actions' descriptors: fewer tokens, a narrower injection surface, and each step can be a small, cheap model.
 - **Single-pass synthesis.** One LLM call turns the raw results into a reply.
-- **Transparent fallback.** No workflow matches? The request goes to a `ReasoningEngine`, untouched: images, tool calls, cache breakpoints and streaming included.
+- **Transparent fallback.** No action matches? The request goes to a `ReasoningEngine`, untouched: images, tool calls, cache breakpoints and streaming included.
 - **OpenAI chat completions as the model.** Any harness that speaks it works, and `NewChatCompletionHandler` serves a `ControlPlane` over `net/http`.
 - **Composable middleware.** Route models, attach identities, or add your own steps to the chain.
 - **Claude and OpenAI-compatible adapters**, built on the official SDKs.
@@ -90,7 +90,7 @@ go get github.com/morebec/proxias
 > [!NOTE]
 > Proxias requires Go 1.25 or later. It is a library: transports (HTTP, gRPC, CLI) live in your application, and the only one it ships is the OpenAI chat completions endpoint as an `http.Handler`.
 
-A runnable hello world is in [examples/basic](examples/basic): one workflow that answers without any LLM, and Claude as the reasoning engine for the rest.
+A runnable hello world is in [examples/basic](examples/basic): one action that answers without any LLM, and Claude as the reasoning engine for the rest.
 
 ```sh
 export ANTHROPIC_API_KEY=...
@@ -103,15 +103,15 @@ go run ./examples/basic
 ChatCompletionRequest
       │
       ▼
-1. WorkflowDescriptors()     the workflows: ID, name, description, input schema
+1. ActionDescriptors()     the actions: ID, name, description, input schema
       │
       ├─ none ──────────────────────────────────────────────┐
       ▼                                                     │
-2. Classify()                which workflows, if any, and their parameters
+2. Classify()                which actions, if any, and their parameters
       │                                                     │
       ├─ reasoning intent (none) ───────────────────────────┤
       ▼                                                     ▼
-3. ExecuteWorkflows()                              5. Reason()
+3. ExecuteActions()                              5. Reason()
       │                                                     │
       ▼                                                     ▼
 4. Synthesize()  ─▶  ChatCompletionResponse        ChatCompletionResponse
@@ -119,54 +119,56 @@ ChatCompletionRequest
 
 A `ControlPlane` is a chain of middleware; the first step that answers bypasses the rest. The usual chain has two steps:
 
-1. **Workflow interception** (`NewWorkflowInterceptionMiddleware`). Lists the workflows, classifies the request into an `Intent`, runs every workflow it names in one call, and synthesizes the reply. Without a workflow, it passes the request on, with the descriptors in the context.
-2. **Reasoning** (`NewReasoningMiddleware`, always last). The `ReasoningEngine` answers, knowing which workflows the application has.
+1. **Action interception** (`NewActionInterceptionMiddleware`). Lists the actions, classifies the request into an `Intent`, runs every action it names in one call, and synthesizes the reply. Without an action, it passes the request on, with the descriptors in the context.
+2. **Reasoning** (`NewReasoningMiddleware`, always last). The `ReasoningEngine` answers, knowing which actions the application has.
 
 ### The four interfaces
 
 | Interface | Role | Typically implemented with |
 |---|---|---|
-| `IntentClassifier` | Which workflows a request asks for, and their parameters (`Intent`) | rules, a local model, a classification service |
-| `WorkflowExecutionEngine` | Describes the workflows and runs the ones an `Intent` names | your workflow registry, a job queue |
-| `WorkflowExecutionSynthesizer` | The reply to a request that ran workflows | one LLM call, or templates |
-| `ReasoningEngine` | The reply when no workflow fits | the LLM, as without Proxias |
+| `IntentClassifier` | Which actions a request asks for, and their parameters (`Intent`) | rules, a local model, a classification service |
+| `ActionExecutionEngine` | Describes the actions and runs the ones an `Intent` names | your action registry, a job queue |
+| `ActionExecutionSynthesizer` | The reply to a request that ran actions | one LLM call, or templates |
+| `ReasoningEngine` | The reply when no action fits | the LLM, as without Proxias |
 
-`IntentClassifierFunc`, `WorkflowExecutionSynthesizerFunc` and `ReasoningEngineFunc` turn a function into one. `NewCompositeIntentClassifier(selector, extractor)` splits classification into two stages: a `WorkflowExecutionIntentSelector` names the workflows, then a `WorkflowExecutionIntentParameterExtractor`, given only those workflows' descriptors, reads their parameters.
+An **action** is whatever the engine runs for a request: a plain function as much as a workflow, a process or a pipeline.
 
-An `Intent` with no workflow is a **reasoning intent** (`IsReasoningIntent`): nothing runs, and the request goes to the reasoning engine. One request can ask for several workflows (*"restart api and tell me the version"*).
+`IntentClassifierFunc`, `ActionExecutionSynthesizerFunc` and `ReasoningEngineFunc` turn a function into one. `NewCompositeIntentClassifier(selector, extractor)` splits classification into two stages: an `ActionExecutionIntentSelector` names the actions, then an `ActionExecutionIntentParameterExtractor`, given only those actions' descriptors, reads their parameters.
+
+An `Intent` with no action is a **reasoning intent** (`IsReasoningIntent`): nothing runs, and the request goes to the reasoning engine. One request can ask for several actions (*"restart api and tell me the version"*).
 
 > [!TIP]
-> A workflow that cannot run for a reason the user should hear of (a missing parameter, an invalid input) is not an error: return a result whose `Status` says so, with the reason in `Data`, and the synthesizer explains it. Errors are for failures of the system, and are returned wrapped with their stage, so `errors.Is` finds the cause.
+> An action that cannot run for a reason the user should hear of (a missing parameter, an invalid input) is not an error: return a result whose `Status` says so, with the reason in `Data`, and the synthesizer explains it. Errors are for failures of the system, and are returned wrapped with their stage, so `errors.Is` finds the cause.
 
-The engine is yours, so anything can run behind it: plain Go, a job queue, RPA tools, or MCP servers, which then become a controlled backend instead of an open action space. A long-running workflow can return a task ID, and checking on it is another workflow.
+The engine is yours, so anything can run behind it: plain Go, a job queue, RPA tools, or MCP servers, which then become a controlled backend instead of an open action space. A long-running action can return a task ID, and checking on it is another action.
 
 ## Trade-offs
 
 Proxias trades flexibility for reliability, and it moves some risks rather than removing them:
 
-- **Workflows come first.** A process must be mapped, written and given a schema before an agent can use it, and that takes domain knowledge.
+- **Actions come first.** A process must be mapped, written and given a schema before an agent can use it, and that takes domain knowledge.
 - **Open-ended requests bypass it.** Brainstorming and the like go to the reasoning engine. Give that lane no tools, or read-only ones.
-- **The classifier can be wrong.** It can pick the wrong workflow or miss the right one. Evaluate it on labeled examples, and prefer the reasoning intent (or a clarifying question) when unsure.
+- **The classifier can be wrong.** It can pick the wrong action or miss the right one. Evaluate it on labeled examples, and prefer the reasoning intent (or a clarifying question) when unsure.
 - **Parameters can be plausible but wrong.** Validate them in the engine, confirm high-impact actions, and require approval for risky ones.
-- **Prompt injection is narrowed, not gone.** User text and workflow results are still untrusted input to the models that read them.
-- **Follow-ups need defined behavior.** *"Do the same for March"* is classified with the conversation it comes in; decide what your workflows do with it.
+- **Prompt injection is narrowed, not gone.** User text and action results are still untrusted input to the models that read them.
+- **Follow-ups need defined behavior.** *"Do the same for March"* is classified with the conversation it comes in; decide what your actions do with it.
 - **Several models per request.** Each is small, but their latency adds up.
-- **A synthesizer can misstate a result.** Use templates for the figures that matter (`WorkflowExecutionSynthesizerFunc`) rather than letting a model paraphrase them.
+- **A synthesizer can misstate a result.** Use templates for the figures that matter (`ActionExecutionSynthesizerFunc`) rather than letting a model paraphrase them.
 
 ## Usage
 
 ### Serving the chat completions endpoint
 
 ```go
-interception, err := proxias.NewWorkflowInterceptionMiddleware(
+interception, err := proxias.NewActionInterceptionMiddleware(
 	proxias.NewCompositeIntentClassifier(selector, extractor),
-	workflows,   // your WorkflowExecutionEngine
-	synthesizer, // e.g. anthropic.NewWorkflowExecutionSynthesizer(client, model)
+	actions,     // your ActionExecutionEngine
+	synthesizer, // e.g. anthropic.NewActionExecutionSynthesizer(client, model)
 )
 if err != nil {
 	return err
 }
-reasoning, err := proxias.NewReasoningMiddleware(reasoner) // forwards what no workflow fits to the LLM
+reasoning, err := proxias.NewReasoningMiddleware(reasoner) // forwards what no action fits to the LLM
 if err != nil {
 	return err
 }
@@ -196,7 +198,7 @@ response, err := controlPlane.Process(ctx, proxias.ChatCompletionRequest{
 })
 ```
 
-A workflow's reply is built with `NewChatCompletionBuilder(req).BuildText(...)` (or `.BuildToolCalls(...)`) and wrapped by `NewChatCompletionResponse(req, completion)`, which streams it if the request asked for a stream.
+An action's reply is built with `NewChatCompletionBuilder(req).BuildText(...)` (or `.BuildToolCalls(...)`) and wrapped by `NewChatCompletionResponse(req, completion)`, which streams it if the request asked for a stream.
 
 ## Adapters
 
@@ -236,7 +238,7 @@ reasoner := openai.NewReasoningEngine(client, "openai/gpt-5")
 
 - **answer**, as the reasoning middleware does;
 - **pass on** a changed request, for instance to route the model: `req.Model = chooseModel(req); return next(ctx, req)`;
-- **add to the context** what the rest needs, as the interception middleware does with `WithWorkflowDescriptors` / `WorkflowDescriptorsFrom`.
+- **add to the context** what the rest needs, as the interception middleware does with `WithActionDescriptors` / `ActionDescriptorsFrom`.
 
 Because the chain sits outside the harness, it is one place for what every request should go through, whatever the harness: stripping personal data before it reaches a model, authorization and injection screening, model selection and provider fallback, context compaction, telemetry. Proxias ships the chain, not these steps.
 
@@ -257,7 +259,7 @@ controlPlane, _ := proxias.NewControlPlane(user, interception, reasoning)
 
 ## Trying it with a real harness
 
-[examples/sandbox](examples/sandbox) serves a `ControlPlane` as the chat completions endpoint, with one workflow and Claude for every LLM step (it needs `ANTHROPIC_API_KEY`). [OpenClaw](https://github.com/openclaw/openclaw) runs against it in a Docker container, so nothing else needs installing. To try a middleware, change `buildControlPlane` and restart.
+[examples/sandbox](examples/sandbox) serves a `ControlPlane` as the chat completions endpoint, with one action and Claude for every LLM step (it needs `ANTHROPIC_API_KEY`). [OpenClaw](https://github.com/openclaw/openclaw) runs against it in a Docker container, so nothing else needs installing. To try a middleware, change `buildControlPlane` and restart.
 
 ```sh
 task sandbox                                 # the sandbox, on :8787 (SANDBOX_PORT=... to change it)

@@ -464,19 +464,19 @@ func TestReasoningEngineReasonAsksTheAPIToStreamOnlyWhenTheHarnessDoes(t *testin
 	}
 }
 
-func TestReasoningEngineReasonTellsTheModelTheWorkflows(t *testing.T) {
+func TestReasoningEngineReasonTellsTheModelTheActions(t *testing.T) {
 	tests := []struct {
 		name  string
-		given []proxias.WorkflowDescriptor
+		given []proxias.ActionDescriptor
 		then  string // the text of the system blocks, after the harness's own
 	}{
 		{
-			name:  "GIVEN workflows THEN the model is told what they are, after the harness's system prompt",
-			given: []proxias.WorkflowDescriptor{restartService, appVersion},
-			then:  "## Workflows\nThe application also runs these workflows for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service\n- App version: Tells the running version",
+			name:  "GIVEN actions THEN the model is told what they are, after the harness's system prompt",
+			given: []proxias.ActionDescriptor{restartService, appVersion},
+			then:  "## Actions\nThe application also runs these actions for the requests that ask for them. When asked what the application can do, describe them:\n- Restart a service: Restarts a service\n- App version: Tells the running version",
 		},
 		{
-			name:  "GIVEN no workflow THEN no block is added",
+			name:  "GIVEN no action THEN no block is added",
 			given: nil,
 			then:  "",
 		},
