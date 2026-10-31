@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.78.0
+	github.com/google/uuid v1.6.0
 	github.com/openai/openai-go/v3 v3.66.0
 	github.com/stretchr/testify v1.12.1
 )
