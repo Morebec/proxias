@@ -25,3 +25,6 @@ vendor/
 
 # The sandbox's secrets (task sandbox reads it)
 .env
+
+# The agent-cli example's workspace
+/workspace/

@@ -3,11 +3,16 @@
 // (claude-haiku-5-5, its key ANTHROPIC_API_KEY, as the other examples), which thinks adaptively and shows a summary of
 // its thinking; or, with -vendor openai, over an OpenAI model (-model, gpt-5-mini by default; its key OPENAI_API_KEY).
 //
+// It can also read and write files, and run bash commands, in its workspace (-workdir, ./workspace by default): enough
+// to write itself scripts, and so new capabilities. Nothing sandboxes them beyond the working directory: run it where
+// that is fine.
+//
 //	go run ./examples/agent-cli
 //	go run ./examples/agent-cli -vendor openai
 //	> what time is it?
 //	> remember that the demo is on friday
 //	> what do you remember?
+//	> write yourself a script that tells the weather in Montreal, then use it
 //
 // exit (or Ctrl-D) quits; Ctrl-C cancels the current turn.
 package main
@@ -19,7 +24,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,12 +41,29 @@ import (
 )
 
 var (
-	vendor = flag.String("vendor", "anthropic", "the model's vendor: anthropic or openai")
-	model  = flag.String("model", "", "the model: "+agentdemo.ClaudeModel+" for anthropic, gpt-5-mini for openai, by default")
+	vendor  = flag.String("vendor", "anthropic", "the model's vendor: anthropic or openai")
+	model   = flag.String("model", "", "the model: "+agentdemo.ClaudeModel+" for anthropic, gpt-5-mini for openai, by default")
+	workdir = flag.String("workdir", "workspace", "the directory where the agent reads, writes and runs bash; created if missing")
 )
 
 func main() {
 	flag.Parse()
+	dir, err := filepath.Abs(*workdir)
+	if err == nil {
+		err = os.MkdirAll(dir, 0o750)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "-workdir:", err)
+		os.Exit(2)
+	}
+	// path is where a path of the agent is: in the workspace, unless absolute.
+	path := func(params map[string]any) string {
+		p := fmt.Sprint(params["path"])
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(dir, p)
+	}
 	var (
 		mutex sync.Mutex
 		notes = []string{} // empty, not null, when nothing was remembered yet
@@ -49,7 +73,7 @@ func main() {
 		AgentPersona: agentsdk.AgentPersona{
 			Name:  "Cleo",
 			Role:  "personal assistant in a terminal, brief and friendly",
-			Goals: []string{"answer the user", "keep the notes the user asks to remember"},
+			Goals: []string{"answer the user", "keep the notes the user asks to remember", "give yourself the capabilities you lack"},
 		},
 		ActionExecutor: agentsdk.SimpleActionExecutor{Actions: map[string]agentsdk.SimpleAction{
 			"get_current_time": {
@@ -65,6 +89,51 @@ func main() {
 					defer mutex.Unlock()
 					notes = append(notes, fmt.Sprint(params["note"]))
 					return agentsdk.ActionExecutionResult{ActionID: "remember", Status: "completed"}, nil
+				},
+			},
+			"read_file": {
+				ActionDescriptor: agentsdk.ActionDescriptor{ID: "read_file", Description: "Reads a file of the workspace (a path relative to it, or absolute).", InputSchema: agentdemo.Params("path", "the path of the file")},
+				RunFn: func(_ context.Context, _ agentsdk.Session, params map[string]any) (agentsdk.ActionExecutionResult, error) {
+					content, err := os.ReadFile(path(params))
+					if err != nil {
+						return agentsdk.ActionExecutionResult{ActionID: "read_file", Status: "failed", Data: map[string]any{"error": err.Error()}}, nil //nolint:nilerr // the action failed: its result says why
+					}
+					return agentsdk.ActionExecutionResult{ActionID: "read_file", Status: "completed", Data: map[string]any{"content": string(content)}}, nil
+				},
+			},
+			"write_file": {
+				ActionDescriptor: agentsdk.ActionDescriptor{ID: "write_file", Description: "Writes a file of the workspace, creating it and its directories, or replacing it.", InputSchema: agentdemo.Params("path", "the path of the file", "content", "the whole content of the file")},
+				RunFn: func(_ context.Context, _ agentsdk.Session, params map[string]any) (agentsdk.ActionExecutionResult, error) {
+					file := path(params)
+					err := os.MkdirAll(filepath.Dir(file), 0o750)
+					if err == nil {
+						err = os.WriteFile(file, []byte(fmt.Sprint(params["content"])), 0o600)
+					}
+					if err != nil {
+						return agentsdk.ActionExecutionResult{ActionID: "write_file", Status: "failed", Data: map[string]any{"error": err.Error()}}, nil //nolint:nilerr // the action failed: its result says why
+					}
+					return agentsdk.ActionExecutionResult{ActionID: "write_file", Status: "completed", Data: map[string]any{"path": file}}, nil
+				},
+			},
+			"execute_bash": {
+				ActionDescriptor: agentsdk.ActionDescriptor{ID: "execute_bash", Description: "Runs a bash command in the workspace, for up to 60 seconds, and tells its output and exit code.", InputSchema: agentdemo.Params("command", "the command, as bash -c runs it")},
+				RunFn: func(ctx context.Context, _ agentsdk.Session, params map[string]any) (agentsdk.ActionExecutionResult, error) {
+					ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+					defer cancel()
+					var stdout, stderr strings.Builder
+					cmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprint(params["command"]))
+					cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
+					status, code := "completed", 0
+					if err := cmd.Run(); err != nil {
+						status, code = "failed", -1
+						if exit, ok := err.(*exec.ExitError); ok { //nolint:errorlint // Run returns it unwrapped
+							code = exit.ExitCode()
+						}
+						if ctx.Err() != nil {
+							stderr.WriteString("\n(timed out after 60s)")
+						}
+					}
+					return agentsdk.ActionExecutionResult{ActionID: "execute_bash", Status: status, Data: map[string]any{"stdout": stdout.String(), "stderr": stderr.String(), "exit_code": code}}, nil
 				},
 			},
 			"recall": {
@@ -98,8 +167,9 @@ func main() {
 	}
 	strategy := agentsdk.NewReActStrategy(llm)
 
-	fmt.Println("Talking to Cleo (" + *vendor + ", " + *model + "). exit quits, Ctrl-C cancels a turn.")
-	session := agentsdk.NewSession()
+	fmt.Println("Talking to Cleo (" + *vendor + ", " + *model + ", in " + dir + "). exit quits, Ctrl-C cancels a turn.")
+	session := agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewSystemSource("cli"),
+		"You can read and write files, and run bash commands, in your workspace ("+dir+"). When you lack a capability, write yourself a script that gives it to you, run it, and reuse it later: list your workspace to find the scripts you wrote."))
 	lines := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("> ")
