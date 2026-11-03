@@ -6,7 +6,9 @@
 // An Agent is who it is, its execution layer (ActionExecutor) and the AgentMiddleware that wraps every turn it takes.
 //
 // How an agent thinks is a CognitiveStrategy, one turn at a time: NewReActStrategy (one model call, every action a
-// tool), NewGatedStrategy (a fast classifier, the agent executes what it gates, one synthesis), or the app's own.
+// tool), NewGatedStrategy (an ActionClassifier, an LLMActionClassifier in one call or a CompositeActionClassifier of
+// an ActionSelector and an ActionParameterExtractor, finds the executions, the agent runs them, one synthesis), or the
+// app's own. Each prompt is a field of what uses it, its default an exported constant (DefaultReActPrompt...).
 // Strategies are vendor-neutral over two model interfaces: LLM, and System1Model (a System One model: questions about
 // a state, answered with probabilities), which adapters implement.
 //

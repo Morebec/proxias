@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/morebec/proxias/agentsdk/anthropic"
+	"github.com/morebec/proxias/agentsdk/adapters/anthropic"
 )
 
 func TestUsageCounter(t *testing.T) {

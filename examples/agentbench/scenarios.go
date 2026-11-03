@@ -47,7 +47,7 @@ func chat(ctx context.Context, r *run) (bool, string, error) {
 		},
 		Intents:   []proxias.Intent{agentdemo.Intent("send_email", "to", "joe@boss.com", "body", "Hello Boss!")},
 		Syntheses: []string{`I emailed joe@boss.com.`},
-		Fallback:  []string{`You're welcome!` + agentdemo.Done},
+		Reasoning: []string{`You're welcome!` + agentdemo.Done},
 	})
 	thanked, err := r.chat(ctx, ada, strategy, "Please email joe@boss.com: Hello Boss!", "Thanks!")
 	if err != nil {
@@ -67,7 +67,7 @@ func delegate(ctx context.Context, r *run) (bool, string, error) {
 	ritaSays := `Go 1.25 added sync.WaitGroup.Go, which starts a goroutine and tracks it.` + agentdemo.Done
 	rita := agentsdk.Agent{ID: "rita", AgentPersona: agentsdk.AgentPersona{Name: "Rita", Role: "researcher, answers in one sentence"}}
 	max := agentsdk.Agent{ID: "max", AgentPersona: agentsdk.AgentPersona{Name: "Max", Role: "team lead, delegates research"}}
-	max.ActionExecutor = agentdemo.Ask(max, rita, r.strategy(agentdemo.Script{React: []string{ritaSays}, Fallback: []string{ritaSays}}))
+	max.ActionExecutor = agentdemo.Ask(max, rita, r.strategy(agentdemo.Script{React: []string{ritaSays}, Reasoning: []string{ritaSays}}))
 	strategy := r.strategy(agentdemo.Script{
 		React: []string{
 			`<action>{"action_id": "ask_rita", "params": {"message": "What did Go 1.25 add to sync.WaitGroup?"}}</action>`,
@@ -116,7 +116,7 @@ func unattended(ctx context.Context, r *run) (bool, string, error) {
 		},
 		Intents:   []proxias.Intent{{}, agentdemo.Intent("page_oncall", "reason", "the disk of db-1 is 93% full")},
 		Syntheses: []string{`I paged on call about db-1's disk.`},
-		Fallback:  []string{`<thought>Nothing to do.</thought>` + agentdemo.Done},
+		Reasoning: []string{`<thought>Nothing to do.</thought>` + agentdemo.Done},
 	})
 	given := unattendedEvents()
 	session, err := r.watch(ctx, otto, strategy, given...)
@@ -151,7 +151,7 @@ func catalogChat(ctx context.Context, r *run) (bool, string, error) {
 		},
 		Intents:   []proxias.Intent{agentdemo.Intent("email_send", "to", "joe@boss.com", "subject", "Hello", "body", "Hello Boss!")},
 		Syntheses: []string{"I emailed joe@boss.com."},
-		Fallback:  []string{"You're welcome!" + agentdemo.Done},
+		Reasoning: []string{"You're welcome!" + agentdemo.Done},
 	})
 	thanked, err := r.chat(ctx, ada, strategy, "Please email joe@boss.com: Hello Boss!", "Thanks!")
 	if err != nil {
@@ -187,7 +187,7 @@ func catalogUnattended(ctx context.Context, r *run) (bool, string, error) {
 		},
 		Intents:   []proxias.Intent{{}, agentdemo.Intent("devops_page_oncall", "reason", "the disk of db-1 is 93% full")},
 		Syntheses: []string{"I paged on call about db-1's disk."},
-		Fallback:  []string{idle, agentdemo.Done},
+		Reasoning: []string{idle, agentdemo.Done},
 	})
 	if _, err := r.watch(ctx, otto, strategy, unattendedEvents()...); err != nil {
 		return false, "", err

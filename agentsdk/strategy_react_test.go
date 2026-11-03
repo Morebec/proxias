@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
@@ -14,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/anthropic"
+	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
 )
 
 func TestReActStrategy(t *testing.T) {
@@ -147,13 +148,24 @@ func TestReActStrategy(t *testing.T) {
 
 func TestReActStrategyRequest(t *testing.T) {
 	tests := []struct {
-		name     string
-		given    []agentsdk.Event
-		system   []string
-		messages string
+		name  string
+		given []agentsdk.Event
+		// prompt is the strategy's Prompt, the start of the first system prompt the told one.
+		prompt, told string
+		system       []string
+		messages     string
 	}{
 		{
+			name:     "GIVEN a prompt THEN it is the system prompt, before who the agent is",
+			prompt:   "Be an agent.",
+			told:     "Be an agent.\n\n# Who you are",
+			system:   []string{},
+			given:    []agentsdk.Event{{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")}},
+			messages: `[{"role":"user","content":[{"type":"text","text":"hi"}]}]`,
+		},
+		{
 			name: "GIVEN leading system messages THEN they are instructions",
+			told: agentsdk.DefaultReActPrompt,
 			given: []agentsdk.Event{
 				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewSystemSource("app"), Payload: []byte("Be brief.")},
 				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")},
@@ -163,6 +175,7 @@ func TestReActStrategyRequest(t *testing.T) {
 		},
 		{
 			name:   "GIVEN the agent's action and its result THEN they are a tool call and its result",
+			told:   agentsdk.DefaultReActPrompt,
 			system: []string{},
 			given: []agentsdk.Event{
 				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("email joe")},
@@ -177,6 +190,7 @@ func TestReActStrategyRequest(t *testing.T) {
 		},
 		{
 			name:   "GIVEN the agent's thinking, its action and the result THEN the thinking is given back signed before the tool call",
+			told:   agentsdk.DefaultReActPrompt,
 			system: []string{},
 			given: []agentsdk.Event{
 				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("email joe")},
@@ -194,6 +208,7 @@ func TestReActStrategyRequest(t *testing.T) {
 		},
 		{
 			name:   "GIVEN events of other sources THEN they are tagged with their type and source",
+			told:   agentsdk.DefaultReActPrompt,
 			system: []string{},
 			given: []agentsdk.Event{
 				{Type: "probe.disk", Source: agentsdk.NewSystemSource("db-1"), Payload: []byte("93%")},
@@ -216,7 +231,9 @@ func TestReActStrategyRequest(t *testing.T) {
 				"send_email": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "send_email", Description: "Sends an email."}},
 			}}}
 
-			for u := range agentsdk.NewReActStrategy(llm).Invoke(context.Background(), agentsdk.Invocation{Agent: agent, Session: agentsdk.NewSession(tt.given...)}) {
+			strategy := agentsdk.NewReActStrategy(llm)
+			strategy.Prompt = tt.prompt
+			for u := range strategy.Invoke(context.Background(), agentsdk.Invocation{Agent: agent, Session: agentsdk.NewSession(tt.given...)}) {
 				require.NoError(t, u.Err)
 			}
 
@@ -226,7 +243,8 @@ func TestReActStrategyRequest(t *testing.T) {
 			encoded, _ := json.Marshal(told["system"])
 			require.NoError(t, json.Unmarshal(encoded, &system))
 			require.NotEmpty(t, system)
-			assert.Contains(t, system[0].Text, agentsdk.NewAgentPrompt(agent), "the model is told who the agent is")
+			assert.Contains(t, system[0].Text, agentsdk.NewAgentPrompt(agent).String(), "the model is told who the agent is")
+			assert.True(t, strings.HasPrefix(system[0].Text, tt.told), "the model is told the prompt first")
 			instructions := make([]string, 0, len(system)-1)
 			for _, block := range system[1:] {
 				instructions = append(instructions, block.Text)

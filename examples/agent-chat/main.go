@@ -59,7 +59,7 @@ func main() {
 		},
 		Intents:   []proxias.Intent{agentdemo.Intent("send_email", "to", "joe@boss.com", "body", "Hello Boss!")},
 		Syntheses: []string{`Done: I emailed "Hello Boss!" to joe@boss.com.`},
-		Fallback:  []string{`You're welcome!` + agentdemo.Done},
+		Reasoning: []string{`You're welcome!` + agentdemo.Done},
 	})
 
 	if *serve != "" {

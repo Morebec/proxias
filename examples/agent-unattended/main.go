@@ -32,7 +32,7 @@ func main() {
 		},
 		Intents:   []proxias.Intent{{}, agentdemo.Intent("page_oncall", "reason", "the disk of db-1 is 93% full")},
 		Syntheses: []string{`I paged on call about db-1's disk.`},
-		Fallback:  []string{`<thought>Nothing to do.</thought>` + agentdemo.Done},
+		Reasoning: []string{`<thought>Nothing to do.</thought>` + agentdemo.Done},
 	})
 
 	// What it watches: a probe of db-1's disk, every second.

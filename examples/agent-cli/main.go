@@ -28,8 +28,8 @@ import (
 	openaisdk "github.com/openai/openai-go/v3"
 
 	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/anthropic"
-	agentopenai "github.com/morebec/proxias/agentsdk/openai"
+	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
+	agentopenai "github.com/morebec/proxias/agentsdk/adapters/openai"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 

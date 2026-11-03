@@ -20,7 +20,7 @@ func main() {
 	ritaSays := `Go 1.25 added sync.WaitGroup.Go, which starts a goroutine and tracks it.` + agentdemo.Done
 	rita := agentsdk.Agent{ID: "rita", AgentPersona: agentsdk.AgentPersona{Name: "Rita", Role: "researcher, answers in one sentence"}}
 	max := agentsdk.Agent{ID: "max", AgentPersona: agentsdk.AgentPersona{Name: "Max", Role: "team lead, delegates research"}}
-	max.ActionExecutor = agentdemo.Ask(max, rita, agentdemo.Strategy(agentdemo.Script{React: []string{ritaSays}, Fallback: []string{ritaSays}}))
+	max.ActionExecutor = agentdemo.Ask(max, rita, agentdemo.Strategy(agentdemo.Script{React: []string{ritaSays}, Reasoning: []string{ritaSays}}))
 	question := agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "What's new in sync.WaitGroup in Go 1.25? Ask Rita.")
 	agentdemo.Print(question)
 	asked := agentsdk.NewSession(question)
@@ -55,7 +55,7 @@ func main() {
 	}
 	opener := agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "Should we rewrite the billing service in Go?")
 	agentdemo.Print(opener)
-	if err := converse(ctx, opener, 4, []agentsdk.Agent{olga, sam}, agentdemo.Strategy(agentdemo.Script{React: says, Fallback: says})); err != nil {
+	if err := converse(ctx, opener, 4, []agentsdk.Agent{olga, sam}, agentdemo.Strategy(agentdemo.Script{React: says, Reasoning: says})); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -89,7 +90,17 @@ func (m LLM) messages(system []string, conversation []agentsdk.LLMMessage) []ope
 	for _, text := range system {
 		params = append(params, openai.SystemMessage(text))
 	}
+	// Consecutive messages of one role are one: the API wants an assistant's tool calls in one message, before their
+	// results.
+	var merged []agentsdk.LLMMessage
 	for _, message := range conversation {
+		if n := len(merged); n > 0 && merged[n-1].Role == message.Role {
+			merged[n-1].Parts = append(slices.Clip(merged[n-1].Parts), message.Parts...)
+			continue
+		}
+		merged = append(merged, message)
+	}
+	for _, message := range merged {
 		if message.Role == agentsdk.RoleAssistant {
 			var (
 				text      []string

@@ -2,14 +2,10 @@ package agentsdk
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 )
-
-// ErrUnknownAction is an action that an executor does not know.
-var ErrUnknownAction = errors.New("unknown action")
 
 // ActionDescriptor describes an action to whatever chooses among them (a model, a classifier): what it is called,
 // what it does and how it is called (its InputSchema).
@@ -80,13 +76,15 @@ func (e SimpleActionExecutor) Descriptors(context.Context, Session) ([]ActionDes
 	return descs, nil
 }
 
-// Execute runs the actions one after the other; an unknown action, or the error of a function, is an error.
+// Execute runs the actions one after the other. An unknown action fails: its result says so, for the model to see. The
+// error of a function is an error.
 func (e SimpleActionExecutor) Execute(ctx context.Context, s Session, intents []ActionExecutionRequest) ([]ActionExecutionResult, error) {
 	results := make([]ActionExecutionResult, 0, len(intents))
 	for _, intent := range intents {
 		action, ok := e.Actions[intent.ActionID]
 		if !ok || action.RunFn == nil {
-			return nil, fmt.Errorf("%w: %s", ErrUnknownAction, intent.ActionID)
+			results = append(results, ActionExecutionResult{ActionID: intent.ActionID, Status: "failed", Data: map[string]any{"error": "unknown action"}})
+			continue
 		}
 		result, err := action.RunFn(ctx, s, intent.Params)
 		if err != nil {

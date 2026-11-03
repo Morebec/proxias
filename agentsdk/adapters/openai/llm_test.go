@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/morebec/proxias/agentsdk"
-	"github.com/morebec/proxias/agentsdk/openai"
+	"github.com/morebec/proxias/agentsdk/adapters/openai"
 )
 
 func TestLLMComplete(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/morebec/proxias/agentsdk"
-	"github.com/morebec/proxias/agentsdk/anthropic"
+	"github.com/morebec/proxias/agentsdk/adapters/anthropic"
 )
 
 // mockClaude is a Messages API that answers status and body, and records the request it was sent.
@@ -65,7 +65,7 @@ func TestLLMComplete(t *testing.T) {
 			name:   "GIVEN the thinking of an earlier answer THEN it is given back signed, as it came, before its tool call",
 			status: http.StatusOK,
 			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":"It is noon."}]}`,
-			when: agentsdk.LLMRequest{Messages: []agentsdk.LLMMessage{
+			when: agentsdk.LLMRequest{Tools: []agentsdk.ActionDescriptor{{ID: "get_time"}}, Messages: []agentsdk.LLMMessage{
 				{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "what time is it?"}}},
 				{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{
 					{Thinking: "The user wants the time.", Signature: "sig1"},
@@ -111,6 +111,23 @@ func TestLLMComplete(t *testing.T) {
 			]`,
 			system: `[{"type":"text","text":"You are Ada."},{"type":"text","text":"Be brief.","cache_control":{"type":"ephemeral"}}]`,
 			tools:  `[{"name":"send_email","description":"Sends an email.","input_schema":{"type":"object","properties":{"to":{"type":"string"}},"required":["to"]}}]`,
+		},
+		{
+			name:   "GIVEN tool calls and their results, and no tools THEN they are left out, and a message left empty with them",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":"Sent."}]}`,
+			when: agentsdk.LLMRequest{Messages: []agentsdk.LLMMessage{
+				{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "email joe"}}},
+				{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{Text: "An email."}, {ToolCall: &agentsdk.LLMToolCall{ID: "toolu_0", Name: "send_email"}}}},
+				{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{ToolResult: &agentsdk.LLMToolResult{CallID: "toolu_0", Content: "sent"}}}},
+				{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "thanks"}}},
+			}},
+			then: []agentsdk.LLMChunk{{Text: "Sent."}},
+			messages: `[
+				{"role":"user","content":[{"type":"text","text":"email joe"}]},
+				{"role":"assistant","content":[{"type":"text","text":"An email."}]},
+				{"role":"user","content":[{"type":"text","text":"thanks"}]}
+			]`,
 		},
 		{
 			name:   "GIVEN a conversation that ends on the agent THEN a user turn ends it",

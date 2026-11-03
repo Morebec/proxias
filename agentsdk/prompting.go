@@ -24,7 +24,7 @@ type promptBlockKind int
 // for a strategy that tells a model: its source, then its name, role, goals
 // and biases, those it has. Every premade strategy tells its models this, so that they are compared on the same
 // context.
-func NewAgentPrompt(a Agent) string {
+func NewAgentPrompt(a Agent) *Prompt {
 	p := NewPrompt()
 	name := "(" + a.AsSource().String() + ")"
 	if a.Name != "" {
@@ -50,7 +50,7 @@ func NewAgentPrompt(a Agent) string {
 		}
 	}
 
-	return p.String()
+	return p
 }
 
 // Prompt builds the text of a prompt for an LLM from paragraphs, titled sections and bullet points, so that

@@ -40,7 +40,7 @@ func NewLLM(client anthropic.Client, model anthropic.Model) LLM {
 // SDK's errors are returned as they are (errors.As an *anthropic.Error).
 func (m LLM) Complete(ctx context.Context, req agentsdk.LLMRequest) iter.Seq2[agentsdk.LLMChunk, error] {
 	return func(yield func(agentsdk.LLMChunk, error) bool) {
-		params := anthropic.MessageNewParams{Model: m.model, MaxTokens: m.maxTokens, Messages: m.messages(req.Messages), Thinking: m.Thinking}
+		params := anthropic.MessageNewParams{Model: m.model, MaxTokens: m.maxTokens, Messages: m.messages(req.Messages, len(req.Tools) > 0), Thinking: m.Thinking}
 		for _, text := range req.System {
 			params.System = append(params.System, anthropic.TextBlockParam{Text: text})
 		}
@@ -86,7 +86,8 @@ func (m LLM) Complete(ctx context.Context, req agentsdk.LLMRequest) iter.Seq2[ag
 }
 
 // messages is the conversation as Claude's: consecutive messages of one role in one message, ending on a user turn as the API requires.
-func (m LLM) messages(conversation []agentsdk.LLMMessage) []anthropic.MessageParam {
+// Without tools, the API refuses tool_use and tool_result blocks: tool calls and their results are left out.
+func (m LLM) messages(conversation []agentsdk.LLMMessage, tools bool) []anthropic.MessageParam {
 	var params []anthropic.MessageParam
 	add := func(role anthropic.MessageParamRole, block anthropic.ContentBlockParamUnion) {
 		if n := len(params); n > 0 && params[n-1].Role == role {
@@ -106,6 +107,7 @@ func (m LLM) messages(conversation []agentsdk.LLMMessage) []anthropic.MessagePar
 				add(role, anthropic.NewThinkingBlock(part.Signature, part.Thinking))
 			case part.RedactedThinking != "":
 				add(role, anthropic.NewRedactedThinkingBlock(part.RedactedThinking))
+			case (part.ToolCall != nil || part.ToolResult != nil) && !tools:
 			case part.ToolCall != nil:
 				input := part.ToolCall.Input
 				if input == nil {

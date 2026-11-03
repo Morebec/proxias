@@ -38,13 +38,20 @@ func TestSimpleActionExecutor(t *testing.T) {
 			},
 		},
 		{
-			name: "GIVEN an unknown action THEN it is an error",
+			name: "GIVEN an unknown action, and one without a function THEN they fail, their results say so, and the others run",
 			given: map[string]agentsdk.SimpleAction{
 				"a": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"}},
+				"b": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "b"}, RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
+					return agentsdk.ActionExecutionResult{ActionID: "b", Status: "completed"}, nil
+				}},
 			},
-			when:        []agentsdk.ActionExecutionRequest{{ActionID: "z"}},
-			descriptors: []string{"a"},
-			wantErr:     true,
+			when:        []agentsdk.ActionExecutionRequest{{ActionID: "z"}, {ActionID: "a"}, {ActionID: "b"}},
+			descriptors: []string{"a", "b"},
+			then: []agentsdk.ActionExecutionResult{
+				{ActionID: "z", Status: "failed", Data: map[string]any{"error": "unknown action"}},
+				{ActionID: "a", Status: "failed", Data: map[string]any{"error": "unknown action"}},
+				{ActionID: "b", Status: "completed"},
+			},
 		},
 		{
 			name: "GIVEN an action that fails THEN it is an error",

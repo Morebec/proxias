@@ -2,10 +2,13 @@ package agentsdk_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,45 +18,248 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/anthropic"
+	"github.com/morebec/proxias/agentsdk/adapters"
+	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
 )
 
 func TestGatedStrategy(t *testing.T) {
 	tests := []struct {
-		name    string
-		actions bool
-		given   []agentsdk.Event
-		// claude are the contents of Claude's answers, in order: the gate's two (the same, as the choice and the noul are
-		// asked concurrently), the extraction's, the synthesis'.
+		name string
+		// single classifies with an LLMActionClassifier, otherwise a CompositeActionClassifier: system1 selects with a
+		// System1ActionSelector, otherwise an LLMActionSelector.
+		single, system1 bool
+		actions         bool
+		// The prompts of the single-call classifier, the selector, the extractor and the synthesis.
+		classificationPrompt, selectionPrompt, extractionPrompt, synthesisPrompt string
+		given                                                                    []agentsdk.Event
+		// claude are the contents of Claude's answers, in order. The System1 selector's choice and noul are asked
+		// concurrently: their answers are the same.
 		claude []string
 		then   []string
-		calls  int
-		stages []agentsdk.GatedStage
+		// prompts are the first system prompt of each call, in any order.
+		prompts []string
+		stages  []agentsdk.GatedStage
 	}{
 		{
-			name:    "GIVEN the gate is sure of an action THEN its parameters are extracted, it is executed, and the synthesizer replies",
+			name:    "GIVEN the single-call classifier finds executions THEN they are executed, and the synthesizer replies",
+			single:  true,
 			actions: true,
 			given: []agentsdk.Event{
 				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a and b")},
 			},
 			claude: []string{
-				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-				`[{"type":"tool_use","id":"toolu_1","name":"echo","input":{"text":"a"}},{"type":"tool_use","id":"toolu_2","name":"echo","input":{"text":"b"}}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}},{\"action_id\":\"echo\",\"params\":{\"text\":\"b\"}}]}"}]`,
 				`[{"type":"text","text":"Echoed a and b."}]`,
 			},
 			then: []string{
 				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
 				`action.request m {"action_id":"echo","params":{"text":"b"}}`,
-				`action.result toolu_1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
-				`action.result toolu_2 {"action_id":"echo","status":"completed","data":{"text":"b"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				`action.result request 2 {"action_id":"echo","status":"completed","data":{"text":"b"}}`,
 				"message  Echoed a and b.",
 			},
-			calls:  4,
-			stages: []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExtract, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+			prompts: []string{agentsdk.DefaultLLMClassificationPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
 		},
 		{
-			name:    "GIVEN the gate finds no action is asked for THEN the fallback takes the turn",
+			name:    "GIVEN instructions THEN they begin the system prompt of the classifier, before its own",
+			single:  true,
+			actions: true,
+			given: []agentsdk.Event{
+				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewSystemSource("app"), Payload: []byte("Be brief.")},
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("thanks")},
+			},
+			claude:  []string{`[{"type":"text","text":"{\"executions\":[]}"}]`},
+			then:    []string{"message  reasoning"},
+			prompts: []string{"Be brief."},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedReasoning},
+		},
+		{
+			name:                 "GIVEN a prompt of the single-call classifier THEN it is the system prompt of its call",
+			single:               true,
+			actions:              true,
+			classificationPrompt: "Classify.",
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("thanks")},
+			},
+			claude:  []string{`[{"type":"text","text":"{\"executions\":[]}"}]`},
+			then:    []string{"message  reasoning"},
+			prompts: []string{"Classify."},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedReasoning},
+		},
+		{
+			name:    "GIVEN the single-call classifier answers words with braces after its JSON THEN only its first JSON value is read",
+			single:  true,
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}}]}\nThe {text} is a."}]`,
+				`[{"type":"text","text":"Echoed a."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				"message  Echoed a.",
+			},
+			prompts: []string{agentsdk.DefaultLLMClassificationPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN the single-call classifier finds an action the agent does not have THEN it is executed, fails, and the synthesizer replies",
+			single:  true,
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("delete everything")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"rm_rf\"}]}"}]`,
+				`[{"type":"text","text":"I cannot."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"rm_rf"}`,
+				`action.result request 1 {"action_id":"rm_rf","status":"failed","data":{"error":"unknown action"}}`,
+				"message  I cannot.",
+			},
+			prompts: []string{agentsdk.DefaultLLMClassificationPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN the selector selects an action, and the extractor its executions THEN they are executed, and the synthesizer replies",
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a and b")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"actions\":[\"echo\"]}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}},{\"action_id\":\"echo\",\"params\":{\"text\":\"b\"}}]}"}]`,
+				`[{"type":"text","text":"Echoed a and b."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
+				`action.request m {"action_id":"echo","params":{"text":"b"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				`action.result request 2 {"action_id":"echo","status":"completed","data":{"text":"b"}}`,
+				"message  Echoed a and b.",
+			},
+			prompts: []string{agentsdk.DefaultLLMSelectionPrompt, agentsdk.DefaultLLMExtractionPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:             "GIVEN prompts of the selector, the extractor and the synthesis THEN they are the system prompts of their calls",
+			actions:          true,
+			selectionPrompt:  "Select.",
+			extractionPrompt: "Extract.",
+			synthesisPrompt:  "Synthesize.",
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"actions\":[\"echo\"]}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}}]}"}]`,
+				`[{"type":"text","text":"Echoed a."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				"message  Echoed a.",
+			},
+			prompts: []string{"Select.", "Extract.", "Synthesize."},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN the extractor answers words with braces after its JSON THEN only its first JSON value is read",
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"actions\":[\"echo\"]}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}}]}\nThe {text} is a."}]`,
+				`[{"type":"text","text":"Echoed a."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				"message  Echoed a.",
+			},
+			prompts: []string{agentsdk.DefaultLLMSelectionPrompt, agentsdk.DefaultLLMExtractionPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN the selector selects nothing THEN nothing is extracted, and the reasoning takes the turn",
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("thanks")},
+			},
+			claude:  []string{`[{"type":"text","text":"{\"actions\":[]}"}]`},
+			then:    []string{"message  reasoning"},
+			prompts: []string{agentsdk.DefaultLLMSelectionPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedReasoning},
+		},
+		{
+			name:    "GIVEN the selector selects an action the agent does not have THEN its parameters are extracted, it is executed, fails, and the synthesizer replies",
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("delete everything")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"actions\":[\"rm_rf\"]}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"rm_rf\"}]}"}]`,
+				`[{"type":"text","text":"I cannot."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"rm_rf"}`,
+				`action.result request 1 {"action_id":"rm_rf","status":"failed","data":{"error":"unknown action"}}`,
+				"message  I cannot.",
+			},
+			prompts: []string{agentsdk.DefaultLLMSelectionPrompt, agentsdk.DefaultLLMExtractionPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN the extractor gives an execution of an action that was not selected THEN it is executed, fails, and the synthesizer replies",
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"actions\":[\"echo\"]}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"rm_rf\"}]}"}]`,
+				`[{"type":"text","text":"I cannot."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"rm_rf"}`,
+				`action.result request 1 {"action_id":"rm_rf","status":"failed","data":{"error":"unknown action"}}`,
+				"message  I cannot.",
+			},
+			prompts: []string{agentsdk.DefaultLLMSelectionPrompt, agentsdk.DefaultLLMExtractionPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN a System1 selector sure of an action THEN the extractor gives its executions, they are executed, and the synthesizer replies",
+			system1: true,
+			actions: true,
+			given: []agentsdk.Event{
+				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo a")},
+			},
+			claude: []string{
+				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
+				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
+				`[{"type":"text","text":"{\"executions\":[{\"action_id\":\"echo\",\"params\":{\"text\":\"a\"}}]}"}]`,
+				`[{"type":"text","text":"Echoed a."}]`,
+			},
+			then: []string{
+				`action.request m {"action_id":"echo","params":{"text":"a"}}`,
+				`action.result request 1 {"action_id":"echo","status":"completed","data":{"text":"a"}}`,
+				"message  Echoed a.",
+			},
+			prompts: []string{adapters.DefaultChoicePrompt, adapters.DefaultNoulPrompt, agentsdk.DefaultLLMExtractionPrompt, agentsdk.DefaultSynthesisPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize},
+		},
+		{
+			name:    "GIVEN a System1 selector that finds no action is asked for THEN the reasoning takes the turn",
+			system1: true,
 			actions: true,
 			given: []agentsdk.Event{
 				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("thanks")},
@@ -62,12 +268,13 @@ func TestGatedStrategy(t *testing.T) {
 				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.1}"}]`,
 				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.1}"}]`,
 			},
-			then:   []string{"message  fallback"},
-			calls:  2,
-			stages: []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedFallback},
+			then:    []string{"message  reasoning"},
+			prompts: []string{adapters.DefaultChoicePrompt, adapters.DefaultNoulPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedReasoning},
 		},
 		{
-			name:    "GIVEN the gate is not confident of the action THEN the fallback takes the turn",
+			name:    "GIVEN a System1 selector not confident of the action THEN the reasoning takes the turn",
+			system1: true,
 			actions: true,
 			given: []agentsdk.Event{
 				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("do the thing")},
@@ -76,63 +283,48 @@ func TestGatedStrategy(t *testing.T) {
 				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.3,\"noul\":0.9}"}]`,
 				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.3,\"noul\":0.9}"}]`,
 			},
-			then:   []string{"message  fallback"},
-			calls:  2,
-			stages: []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedFallback},
+			then:    []string{"message  reasoning"},
+			prompts: []string{adapters.DefaultChoicePrompt, adapters.DefaultNoulPrompt},
+			stages:  []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedReasoning},
 		},
 		{
-			name:    "GIVEN the gate chooses an action the agent does not have THEN the fallback takes the turn",
-			actions: true,
-			given: []agentsdk.Event{
-				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("delete everything")},
-			},
-			claude: []string{
-				`[{"type":"text","text":"{\"choice\":\"rm_rf\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-				`[{"type":"text","text":"{\"choice\":\"rm_rf\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-			},
-			then:   []string{"message  fallback"},
-			calls:  2,
-			stages: []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedFallback},
-		},
-		{
-			name:    "GIVEN the extraction calls no tool THEN the fallback takes the turn",
-			actions: true,
-			given: []agentsdk.Event{
-				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("echo")},
-			},
-			claude: []string{
-				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-				`[{"type":"text","text":"{\"choice\":\"echo\",\"confidence\":0.9,\"noul\":0.9}"}]`,
-				`[{"type":"text","text":"What should I echo?"}]`,
-			},
-			then:   []string{"message  fallback"},
-			calls:  3,
-			stages: []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExtract, agentsdk.GatedFallback},
-		},
-		{
-			name:    "GIVEN the last event is an action result THEN the fallback takes the turn, ungated",
+			name:    "GIVEN the last event is an action result THEN the reasoning takes the turn, unclassified",
 			actions: true,
 			given: []agentsdk.Event{
 				{ID: "r", Type: agentsdk.EventTypeActionResult, Source: agentsdk.NewSystemSource("actions"), Payload: []byte(`{}`)},
 			},
-			then:   []string{"message  fallback"},
-			stages: []agentsdk.GatedStage{agentsdk.GatedFallback},
+			then:   []string{"message  reasoning"},
+			stages: []agentsdk.GatedStage{agentsdk.GatedReasoning},
 		},
 		{
-			name: "GIVEN the agent has no actions THEN the fallback takes the turn, ungated",
+			name: "GIVEN the agent has no actions THEN the reasoning takes the turn, unclassified",
 			given: []agentsdk.Event{
 				{ID: "m", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")},
 			},
-			then:   []string{"message  fallback"},
-			stages: []agentsdk.GatedStage{agentsdk.GatedFallback},
+			then:   []string{"message  reasoning"},
+			stages: []agentsdk.GatedStage{agentsdk.GatedReasoning},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var calls atomic.Int64 // the gate's calls are concurrent
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			var (
+				mutex   sync.Mutex // the System1 selector's calls are concurrent
+				prompts []string
+			)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					System []struct {
+						Text string `json:"text"`
+					} `json:"system"`
+				}
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &request)
+				mutex.Lock()
+				call := len(prompts)
+				prompts = append(prompts, request.System[0].Text)
+				mutex.Unlock()
 				content := `[{"type":"text","text":""}]`
-				if call := int(calls.Add(1)) - 1; call < len(tt.claude) {
+				if call < len(tt.claude) {
 					content = tt.claude[call]
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -140,9 +332,9 @@ func TestGatedStrategy(t *testing.T) {
 			}))
 			defer server.Close()
 			claude := agentanthropic.NewLLM(anthropicsdk.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test"), option.WithMaxRetries(0)), "m")
-			fallback := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+			reasoning := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
 				return func(yield func(agentsdk.StreamUpdate) bool) {
-					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("fallback"))}, StopReason: agentsdk.StopReasonEndTurn})
+					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("reasoning"))}, StopReason: agentsdk.StopReasonEndTurn})
 				}
 			})
 			agent := agentsdk.Agent{ID: "ada"}
@@ -153,21 +345,37 @@ func TestGatedStrategy(t *testing.T) {
 					}},
 				}}
 			}
+			var selector agentsdk.ActionSelector = agentsdk.LLMActionSelector{LLM: claude, Prompt: tt.selectionPrompt}
+			if tt.system1 {
+				selector = agentsdk.System1ActionSelector{System1: adapters.LLMSystem1{LLM: claude}}
+			}
+			var classifier agentsdk.ActionClassifier = agentsdk.NewCompositeActionClassifier(selector, agentsdk.LLMActionParameterExtractor{LLM: claude, Prompt: tt.extractionPrompt})
+			if tt.single {
+				classifier = agentsdk.LLMActionClassifier{LLM: claude, Prompt: tt.classificationPrompt}
+			}
 			var stages []agentsdk.GatedStage
-			strategy := agentsdk.NewGatedStrategy(agentsdk.LLMSystem1{LLM: claude}, claude, fallback, agentsdk.WithStageTimer(func(stage agentsdk.GatedStage, _ time.Duration) {
-				stages = append(stages, stage)
-			}))
+			strategy := agentsdk.NewGatedStrategy(classifier, claude, reasoning)
+			strategy.SynthesisPrompt = tt.synthesisPrompt
+			strategy.StageTimer = func(stage agentsdk.GatedStage, _ time.Duration) { stages = append(stages, stage) }
 
 			var events []string
+			requests := map[agentsdk.EventID]string{} // the requests' IDs are random: a result names its request by its rank
 			for u := range strategy.Invoke(context.Background(), agentsdk.Invocation{Agent: agent, Session: agentsdk.NewSession(tt.given...)}) {
 				require.NoError(t, u.Err)
 				for _, e := range u.Events {
-					events = append(events, string(e.Type)+" "+string(e.CausationID)+" "+e.Text())
+					causation := string(e.CausationID)
+					if rank, ok := requests[e.CausationID]; ok {
+						causation = rank
+					}
+					if e.Type == agentsdk.EventTypeActionRequest {
+						requests[e.ID] = fmt.Sprintf("request %d", len(requests)+1)
+					}
+					events = append(events, string(e.Type)+" "+causation+" "+e.Text())
 				}
 			}
 
 			assert.Equal(t, tt.then, events)
-			assert.Equal(t, tt.calls, int(calls.Load()))
+			assert.ElementsMatch(t, tt.prompts, prompts)
 			assert.Equal(t, tt.stages, stages)
 		})
 	}

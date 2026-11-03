@@ -29,7 +29,7 @@ import (
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/anthropic"
+	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -84,7 +84,7 @@ func (m measure) dollars() float64 {
 }
 
 // stages are the stages of the gated strategy, in the order of the table.
-var stages = []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize, agentsdk.GatedFallback}
+var stages = []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize, agentsdk.GatedReasoning}
 
 // timing records the times and the events of a run as they come.
 type timing struct {
@@ -244,7 +244,7 @@ func report(cells []cell, measures [][]measure) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
 	fmt.Fprintln(w, "scenario\tstrategy\truns\tsuccess\tcalls\tinput tokens\toutput tokens\tcache write\tcache read\tms\t$ per run\t")
 	times := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(times, "scenario\tstrategy\tms\tfirst event ms\tms per call\tturns\tms per turn\tclassify ms\texecute ms\tsynthesize ms\tfallback ms\t")
+	fmt.Fprintln(times, "scenario\tstrategy\tms\tfirst event ms\tms per call\tturns\tms per turn\tclassify ms\texecute ms\tsynthesize ms\treasoning ms\t")
 	var (
 		total       measure
 		dollars     float64
