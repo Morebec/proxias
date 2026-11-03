@@ -17,11 +17,11 @@ func NewClaudeHelper(client anthropicsdk.Client, model anthropicsdk.Model) Claud
 }
 
 // Ask is ask, for the tests.
-func (c claudeHelper) Ask(ctx context.Context, instructions string, input any) (*anthropicsdk.Message, error) {
-	return c.ask(ctx, instructions, input)
+func (c claudeHelper) Ask(ctx context.Context, instructions string, stable, input any) (*anthropicsdk.Message, error) {
+	return c.ask(ctx, instructions, stable, input)
 }
 
 // AskJSON is askJSON, for the tests.
-func (c claudeHelper) AskJSON(ctx context.Context, instructions string, input, answer any) error {
-	return c.askJSON(ctx, instructions, input, answer)
+func (c claudeHelper) AskJSON(ctx context.Context, instructions string, stable, input, answer any) error {
+	return c.askJSON(ctx, instructions, stable, input, answer)
 }

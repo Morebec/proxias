@@ -17,28 +17,36 @@ type claudeHelper struct {
 	model  anthropicsdk.Model
 }
 
-// ask asks the model to follow the instructions for input, which is encoded as JSON in the only user turn, and
-// returns its answer. The instructions never vary, so the API may cache them.
-func (c claudeHelper) ask(ctx context.Context, instructions string, input any) (*anthropicsdk.Message, error) {
+// ask asks the model to follow the instructions for input, and returns its answer. What does not vary from one
+// request to the next (the instructions, then stable, encoded as JSON, unless it is nil: the inventory of actions)
+// is the system prompt, with the cache breakpoint at its end, so that the API can cache all of it; what varies (input,
+// encoded as JSON) is the only user turn. A prefix shorter than the model's minimum is not cached.
+func (c claudeHelper) ask(ctx context.Context, instructions string, stable, input any) (*anthropicsdk.Message, error) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("encode the input: %w", err)
 	}
+	system := []anthropicsdk.TextBlockParam{{Text: instructions}}
+	if stable != nil {
+		fixed, err := json.Marshal(stable)
+		if err != nil {
+			return nil, fmt.Errorf("encode the stable input: %w", err)
+		}
+		system = append(system, anthropicsdk.TextBlockParam{Text: string(fixed)})
+	}
+	system[len(system)-1].CacheControl = anthropicsdk.NewCacheControlEphemeralParam()
 
 	return c.client.Messages.New(ctx, anthropicsdk.MessageNewParams{
 		Model:     c.model,
 		MaxTokens: defaultMaxTokens,
-		System: []anthropicsdk.TextBlockParam{{
-			Text:         instructions,
-			CacheControl: anthropicsdk.NewCacheControlEphemeralParam(),
-		}},
-		Messages: []anthropicsdk.MessageParam{anthropicsdk.NewUserMessage(anthropicsdk.NewTextBlock(string(data)))},
+		System:    system,
+		Messages:  []anthropicsdk.MessageParam{anthropicsdk.NewUserMessage(anthropicsdk.NewTextBlock(string(data)))},
 	})
 }
 
 // askJSON is ask for an answer that is the JSON object of answer.
-func (c claudeHelper) askJSON(ctx context.Context, instructions string, input, answer any) error {
-	message, err := c.ask(ctx, instructions, input)
+func (c claudeHelper) askJSON(ctx context.Context, instructions string, stable, input, answer any) error {
+	message, err := c.ask(ctx, instructions, stable, input)
 	if err != nil {
 		return err
 	}

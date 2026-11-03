@@ -11,7 +11,7 @@ import (
 
 const extractInstructions = `The last message of the user in a conversation was matched to actions. You decide with which parameters each is to run. You only decide, you never answer the user.
 
-You receive a JSON object with the "messages" of the conversation, and the matched "actions": an id, a name, a description and the JSON Schema of the parameters ("schema") of each.
+The system prompt ends with a JSON object with the matched "actions": an id, a name, a description and the JSON Schema of the parameters ("schema") of each. The user turn is a JSON object with the "messages" of the conversation.
 Return the executions of the actions that the last message of the user asks to run now.
 
 - An action may be asked for several times, with different parameters: give one execution for each.
@@ -47,7 +47,7 @@ func (e *ActionExecutionIntentParameterExtractor) ExtractParameters(ctx context.
 			Params   map[string]any `json:"params"`
 		} `json:"executions"`
 	}
-	if err := e.askJSON(ctx, extractInstructions, decisionInput{Messages: newConversation(req), Actions: matchedDescs}, &answer); err != nil {
+	if err := e.askJSON(ctx, extractInstructions, inventory{Actions: matchedDescs}, conversation{Messages: newConversation(req)}, &answer); err != nil {
 		return nil, fmt.Errorf("anthropic: extract parameters: %w", err)
 	}
 

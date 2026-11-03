@@ -23,18 +23,13 @@ type Prompt struct {
 }
 
 type promptBlock struct {
-	kind promptBlockKind
-	text string
+	kind    promptBlockKind
+	content string
 }
 
 // NewPrompt makes an empty Prompt.
 func NewPrompt() *Prompt {
 	return &Prompt{}
-}
-
-// AddParagraph adds text as is. A blank text is ignored.
-func (p *Prompt) AddParagraph(text string) *Prompt {
-	return p.add(promptParagraph, strings.TrimSpace(text))
 }
 
 // AddSection adds a section: a title, and its content, if any. Bullet points added right after it are part
@@ -50,6 +45,11 @@ func (p *Prompt) AddSection(title, content string) *Prompt {
 		text += "\n" + content
 	}
 	return p.add(promptSection, text)
+}
+
+// AddParagraph adds text as is. A blank text is ignored.
+func (p *Prompt) AddParagraph(text string) *Prompt {
+	return p.add(promptParagraph, strings.TrimSpace(text))
 }
 
 // AddBulletPoint adds a bullet point. A blank text is ignored. The lines of a text that has several are
@@ -84,7 +84,7 @@ func (p *Prompt) String() string {
 		if i > 0 {
 			b.WriteString(p.separator(p.blocks[i-1], block))
 		}
-		b.WriteString(block.text)
+		b.WriteString(block.content)
 	}
 
 	return b.String()
@@ -99,7 +99,7 @@ func (p *Prompt) separator(previous, next promptBlock) string {
 
 func (p *Prompt) add(kind promptBlockKind, text string) *Prompt {
 	if text != "" {
-		p.blocks = append(p.blocks, promptBlock{kind: kind, text: text})
+		p.blocks = append(p.blocks, promptBlock{kind: kind, content: text})
 	}
 	return p
 }

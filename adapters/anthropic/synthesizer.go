@@ -44,7 +44,7 @@ func NewActionExecutionSynthesizer(client anthropicsdk.Client, model anthropicsd
 
 // Synthesize implements proxias.ActionExecutionSynthesizer. An empty reply is an error.
 func (s *ActionExecutionSynthesizer) Synthesize(ctx context.Context, synthesis proxias.ActionExecutionSynthesis) (proxias.ChatCompletionResponse, error) {
-	message, err := s.ask(ctx, synthesizeInstructions, synthesisInput{
+	message, err := s.ask(ctx, synthesizeInstructions, nil, synthesisInput{
 		Messages:   newConversation(synthesis.Request),
 		Executions: synthesis.Intent.ActionExecutions,
 		Results:    synthesis.ExecutionResults,

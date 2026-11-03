@@ -16,7 +16,7 @@ func TestClaudeHelperAsk(t *testing.T) {
 	helper := anthropic.NewClaudeHelper(client, someModel)
 
 	// When
-	got, err := helper.Ask(t.Context(), "follow these", map[string]int{"a": 1})
+	got, err := helper.Ask(t.Context(), "follow these", nil, map[string]int{"a": 1})
 
 	// Then the instructions are a cached system block, and the input the JSON of the only user turn
 	require.NoError(t, err)
@@ -46,13 +46,43 @@ func TestClaudeHelperAsk(t *testing.T) {
 	assert.Equal(t, `{"a":1}`, call.Messages[0].Content[0].Text)
 }
 
+func TestClaudeHelperAskCachesTheStableInputWithTheInstructions(t *testing.T) {
+	// Given
+	client, sent := mockAnthropic(t, 200, answerWith("hi"))
+	helper := anthropic.NewClaudeHelper(client, someModel)
+
+	// When
+	_, err := helper.Ask(t.Context(), "follow these", map[string]int{"fixed": 1}, map[string]int{"a": 1})
+
+	// Then the stable input is a system block after the instructions, which ends the cached prefix
+	require.NoError(t, err)
+	var call struct {
+		System []struct {
+			Text         string            `json:"text"`
+			CacheControl map[string]string `json:"cache_control"`
+		} `json:"system"`
+		Messages []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
+	require.Len(t, call.System, 2)
+	assert.Equal(t, "follow these", call.System[0].Text)
+	assert.Empty(t, call.System[0].CacheControl, "one breakpoint, at the end of the prefix")
+	assert.Equal(t, `{"fixed":1}`, call.System[1].Text)
+	assert.Equal(t, "ephemeral", call.System[1].CacheControl["type"])
+	assert.Equal(t, `{"a":1}`, call.Messages[0].Content[0].Text)
+}
+
 func TestClaudeHelperAskFailsForAnInputThatIsNotJSON(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith("hi"))
 	helper := anthropic.NewClaudeHelper(client, someModel)
 
 	// When
-	_, err := helper.Ask(t.Context(), "follow these", make(chan int))
+	_, err := helper.Ask(t.Context(), "follow these", nil, make(chan int))
 
 	// Then
 	assert.ErrorContains(t, err, "encode the input")
@@ -100,7 +130,7 @@ func TestClaudeHelperAskJSON(t *testing.T) {
 			helper := anthropic.NewClaudeHelper(client, someModel)
 			var got answer
 
-			err := helper.AskJSON(t.Context(), "follow these", struct{}{}, &got)
+			err := helper.AskJSON(t.Context(), "follow these", nil, struct{}{}, &got)
 
 			tt.then(t, err)
 			if err == nil {

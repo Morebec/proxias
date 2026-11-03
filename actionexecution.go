@@ -3,6 +3,10 @@ package proxias
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // ActionExecutionEngine is where the deterministic, compiled actions live: it describes them and runs
@@ -162,4 +166,54 @@ func WithActionDescriptors(ctx context.Context, descs []ActionDescriptor) contex
 func ActionDescriptorsFrom(ctx context.Context) []ActionDescriptor {
 	descs, _ := ctx.Value(actionDescriptorsKey{}).([]ActionDescriptor)
 	return descs
+}
+
+// SimpleAction is an action of a SimpleActionExecutionEngine: its descriptor, and the function that runs it.
+type SimpleAction struct {
+	ActionDescriptor
+	RunFn func(ctx context.Context, req ChatCompletionRequest, params map[string]any) (ActionExecutionResult, error)
+}
+
+// SimpleActionExecutionEngine is an ActionExecutionEngine of functions, by action ID.
+type SimpleActionExecutionEngine struct {
+	Actions map[string]SimpleAction
+}
+
+// ActionDescriptors describes the actions that this engine provides, ordered by ID so that what a model is told of
+// them does not change from one request to the next.
+func (e SimpleActionExecutionEngine) ActionDescriptors(_ context.Context, _ ChatCompletionRequest) ([]ActionDescriptor, error) {
+	descs := make([]ActionDescriptor, 0, len(e.Actions))
+	for _, action := range e.Actions {
+		descs = append(descs, action.ActionDescriptor)
+	}
+	slices.SortFunc(descs, func(a, b ActionDescriptor) int { return strings.Compare(a.ID, b.ID) })
+	return descs, nil
+}
+
+// ExecuteActions runs the actions, and returns exactly one result per action execution.
+func (e SimpleActionExecutionEngine) ExecuteActions(ctx context.Context, req ChatCompletionRequest, executions []ActionExecutionIntent) ([]ActionExecutionResult, error) {
+	results := make([]ActionExecutionResult, len(executions))
+	for i, exec := range executions {
+		action, ok := e.Actions[exec.ActionID]
+		executionID := strconv.FormatInt(time.Now().UnixNano(), 10)
+		if !ok {
+			results[i] = ActionExecutionResult{
+				ActionID:    exec.ActionID,
+				ExecutionID: executionID,
+				Status:      "failed",
+				Data:        map[string]any{"error": fmt.Sprintf("action not found: %s", exec.ActionID)},
+			}
+			continue
+		}
+		if action.RunFn == nil {
+			return nil, fmt.Errorf("action %s has no run function", exec.ActionID)
+		}
+		result, err := action.RunFn(ctx, req, exec.Params)
+		if err != nil {
+			return results, err
+		}
+		results[i] = result
+	}
+
+	return results, nil
 }

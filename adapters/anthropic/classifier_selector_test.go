@@ -87,14 +87,13 @@ func TestActionExecutionIntentSelectorSelectSendsTheActionsWithoutTheirSchemas(t
 	// Then
 	require.NoError(t, err)
 	var call struct {
-		Messages []struct {
-			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"messages"`
+		System []struct {
+			Text string `json:"text"`
+		} `json:"system"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
-	user := call.Messages[0].Content[0].Text
+	require.Len(t, call.System, 2)
+	user := call.System[1].Text
 	assert.Contains(t, user, `{"id":"restart_service","name":"Restart a service","description":"Restarts a service"}`)
 	assert.NotContains(t, user, "schema", "the selector does not see the parameters")
 	assert.NotContains(t, user, "required", "the selector does not see the parameters")

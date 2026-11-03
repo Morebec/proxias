@@ -11,7 +11,7 @@ import (
 
 const classifyInstructions = `You interpret the last message of the user in a conversation and match it to the actions of an inventory. You only decide, you never answer the user.
 
-You receive a JSON object with the "messages" of the conversation, and the "actions" inventory: an id, a name, a description and the JSON Schema of the parameters ("schema") of each.
+The system prompt ends with a JSON object with the "actions" inventory: an id, a name, a description and the JSON Schema of the parameters ("schema") of each. The user turn is a JSON object with the "messages" of the conversation.
 Return the executions of the actions that the last message of the user asks to run now.
 
 - Choose an action only when the message clearly asks for what it does. When in doubt, choose none.
@@ -48,7 +48,7 @@ func (c *IntentClassifier) Classify(ctx context.Context, req proxias.ChatComplet
 			Params   map[string]any `json:"params"`
 		} `json:"executions"`
 	}
-	if err := c.askJSON(ctx, classifyInstructions, decisionInput{Messages: newConversation(req), Actions: descs}, &answer); err != nil {
+	if err := c.askJSON(ctx, classifyInstructions, inventory{Actions: descs}, conversation{Messages: newConversation(req)}, &answer); err != nil {
 		return proxias.Intent{}, fmt.Errorf("anthropic: classify: %w", err)
 	}
 
@@ -66,10 +66,15 @@ func (c *IntentClassifier) Classify(ctx context.Context, req proxias.ChatComplet
 	return intent, nil
 }
 
-// decisionInput is what the model reads to decide: the conversation and the actions it can choose from.
-type decisionInput struct {
-	Messages []conversationMessage      `json:"messages"`
-	Actions  []proxias.ActionDescriptor `json:"actions"`
+// inventory is the actions the model chooses from: they do not vary from one request to the next, so they are cached
+// with the instructions.
+type inventory struct {
+	Actions []proxias.ActionDescriptor `json:"actions"`
+}
+
+// conversation is what the model reads to decide: the messages.
+type conversation struct {
+	Messages []conversationMessage `json:"messages"`
 }
 
 // conversationMessage is a message of the conversation as the model reads it: its text.

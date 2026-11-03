@@ -11,7 +11,7 @@ import (
 
 const selectInstructions = `You interpret the last message of the user in a conversation and match it to the actions of an inventory. You only decide, you never answer the user.
 
-You receive a JSON object with the "messages" of the conversation, and the "actions" inventory: an id, a name and a description of each.
+The system prompt ends with a JSON object with the "actions" inventory: an id, a name and a description of each. The user turn is a JSON object with the "messages" of the conversation.
 Return the ids of the actions that the last message of the user asks to run now. Do not extract any parameter.
 
 - Choose an action only when the message clearly asks for what it does. When in doubt, choose none.
@@ -40,16 +40,16 @@ func (s *ActionExecutionIntentSelector) Select(ctx context.Context, req proxias.
 		return nil, nil
 	}
 
-	inventory := make([]proxias.ActionDescriptor, len(descs))
+	actions := make([]proxias.ActionDescriptor, len(descs))
 	for i, d := range descs {
 		d.InputSchema = nil
-		inventory[i] = d
+		actions[i] = d
 	}
 
 	var answer struct {
 		Actions []string `json:"actions"`
 	}
-	if err := s.askJSON(ctx, selectInstructions, decisionInput{Messages: newConversation(req), Actions: inventory}, &answer); err != nil {
+	if err := s.askJSON(ctx, selectInstructions, inventory{Actions: actions}, conversation{Messages: newConversation(req)}, &answer); err != nil {
 		return nil, fmt.Errorf("anthropic: select actions: %w", err)
 	}
 

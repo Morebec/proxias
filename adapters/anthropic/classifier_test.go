@@ -100,7 +100,7 @@ func TestIntentClassifierClassify(t *testing.T) {
 	}
 }
 
-func TestIntentClassifierClassifySendsTheConversationAndTheActionsAsJSON(t *testing.T) {
+func TestIntentClassifierClassifySendsTheActionsInTheCachedPrefixAndTheConversationAsJSON(t *testing.T) {
 	// Given
 	client, sent := mockAnthropic(t, 200, answerWith(`{"executions":[]}`))
 	classifier := anthropic.NewIntentClassifier(client, someModel)
@@ -117,6 +117,10 @@ func TestIntentClassifierClassifySendsTheConversationAndTheActionsAsJSON(t *test
 	// Then
 	require.NoError(t, err)
 	var call struct {
+		System []struct {
+			Text         string            `json:"text"`
+			CacheControl map[string]string `json:"cache_control"`
+		} `json:"system"`
 		Messages []struct {
 			Content []struct {
 				Text string `json:"text"`
@@ -125,10 +129,12 @@ func TestIntentClassifierClassifySendsTheConversationAndTheActionsAsJSON(t *test
 	}
 	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
 	require.Len(t, call.Messages, 1)
+	require.Len(t, call.System, 2, "the instructions, then the actions")
+	assert.Equal(t, "ephemeral", call.System[1].CacheControl["type"], "the instructions and the actions never vary: they are cached")
 	var input struct {
 		Actions []proxias.ActionDescriptor `json:"actions"`
 	}
-	require.NoError(t, json.Unmarshal([]byte(call.Messages[0].Content[0].Text), &input))
+	require.NoError(t, json.Unmarshal([]byte(call.System[1].Text), &input))
 	assert.Equal(t, []proxias.ActionDescriptor{restartService}, input.Actions)
 	assert.Contains(t, call.Messages[0].Content[0].Text, `{"role":"system","content":"We run a hosting company"}`)
 	assert.Contains(t, call.Messages[0].Content[0].Text, `{"role":"assistant","content":"done"}`)

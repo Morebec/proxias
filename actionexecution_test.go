@@ -383,3 +383,166 @@ func TestActionDescriptorsFrom(t *testing.T) {
 		})
 	}
 }
+
+func mockSimpleAction(desc proxias.ActionDescriptor, result proxias.ActionExecutionResult, err error) proxias.SimpleAction {
+	return proxias.SimpleAction{
+		ActionDescriptor: desc,
+		RunFn: func(context.Context, proxias.ChatCompletionRequest, map[string]any) (proxias.ActionExecutionResult, error) {
+			return result, err
+		},
+	}
+}
+
+// simpleActionRun is what a SimpleAction was given when it ran.
+type simpleActionRun struct {
+	req    proxias.ChatCompletionRequest
+	params map[string]any
+}
+
+func recordingSimpleAction(desc proxias.ActionDescriptor, recorded *simpleActionRun) proxias.SimpleAction {
+	return proxias.SimpleAction{
+		ActionDescriptor: desc,
+		RunFn: func(_ context.Context, req proxias.ChatCompletionRequest, params map[string]any) (proxias.ActionExecutionResult, error) {
+			*recorded = simpleActionRun{req: req, params: params}
+			return proxias.ActionExecutionResult{ActionID: desc.ID, Status: "completed"}, nil
+		},
+	}
+}
+
+func TestSimpleActionExecutionEngineActionDescriptors(t *testing.T) {
+	tests := []struct {
+		name  string
+		given map[string]proxias.SimpleAction
+		then  []proxias.ActionDescriptor
+	}{
+		{
+			name: "canonical",
+			given: map[string]proxias.SimpleAction{
+				"some_action":       mockSimpleAction(someActionDescriptor, proxias.ActionExecutionResult{}, nil),
+				"some_other_action": mockSimpleAction(someOtherActionDescriptor, proxias.ActionExecutionResult{}, nil),
+			},
+			then: []proxias.ActionDescriptor{someActionDescriptor, someOtherActionDescriptor},
+		},
+		{
+			name:  "GIVEN no actions THEN it describes none",
+			given: nil,
+			then:  []proxias.ActionDescriptor{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := proxias.SimpleActionExecutionEngine{Actions: tt.given}
+
+			got, err := engine.ActionDescriptors(t.Context(), someRequest)
+
+			require.NoError(t, err)
+			// The actions are a map: their order is not the engine's to keep.
+			assert.ElementsMatch(t, tt.then, got)
+		})
+	}
+}
+
+func TestSimpleActionExecutionEngineExecuteActions(t *testing.T) {
+	someResult := proxias.ActionExecutionResult{ActionID: "some_action", ExecutionID: "1", Status: "completed"}
+	someOtherResult := proxias.ActionExecutionResult{ActionID: "some_other_action", ExecutionID: "2", Status: "completed"}
+	actions := map[string]proxias.SimpleAction{
+		"some_action":       mockSimpleAction(someActionDescriptor, someResult, nil),
+		"some_other_action": mockSimpleAction(someOtherActionDescriptor, someOtherResult, nil),
+	}
+	tests := []struct {
+		name  string
+		given map[string]proxias.SimpleAction
+		when  []proxias.ActionExecutionIntent
+		then  []proxias.ActionExecutionResult
+	}{
+		{
+			name:  "canonical",
+			given: actions,
+			when:  []proxias.ActionExecutionIntent{someActionExecutionIntent},
+			then:  []proxias.ActionExecutionResult{someResult},
+		},
+		{
+			name:  "WHEN several actions are asked for THEN there is a result per execution, in their order",
+			given: actions,
+			when:  []proxias.ActionExecutionIntent{someOtherActionExecutionIntent, someActionExecutionIntent},
+			then:  []proxias.ActionExecutionResult{someOtherResult, someResult},
+		},
+		{
+			name:  "WHEN an action is asked for twice THEN it runs twice",
+			given: actions,
+			when:  []proxias.ActionExecutionIntent{someActionExecutionIntent, someActionExecutionIntent},
+			then:  []proxias.ActionExecutionResult{someResult, someResult},
+		},
+		{
+			name: "GIVEN an action that answers a failure THEN it is its result, not an error",
+			given: map[string]proxias.SimpleAction{
+				"some_action": mockSimpleAction(someActionDescriptor, proxias.ActionExecutionResult{ActionID: "some_action", Status: "failed"}, nil),
+			},
+			when: []proxias.ActionExecutionIntent{someActionExecutionIntent},
+			then: []proxias.ActionExecutionResult{{ActionID: "some_action", Status: "failed"}},
+		},
+		{
+			name:  "WHEN no action is asked for THEN there are no results",
+			given: actions,
+			when:  nil,
+			then:  []proxias.ActionExecutionResult{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := proxias.SimpleActionExecutionEngine{Actions: tt.given}
+
+			got, err := engine.ExecuteActions(t.Context(), someRequest, tt.when)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.then, got)
+		})
+	}
+}
+
+func TestSimpleActionExecutionEngineExecuteActionsGivesTheActionTheRequestAndItsParams(t *testing.T) {
+	// Given
+	var recorded simpleActionRun
+	engine := proxias.SimpleActionExecutionEngine{Actions: map[string]proxias.SimpleAction{
+		"some_action": recordingSimpleAction(someActionDescriptor, &recorded),
+	}}
+	params := map[string]any{"city": "Montreal"}
+
+	// When
+	_, err := engine.ExecuteActions(t.Context(), someRequest, []proxias.ActionExecutionIntent{{ActionID: "some_action", Params: params}})
+
+	// Then
+	require.NoError(t, err)
+	assert.Equal(t, simpleActionRun{req: someRequest, params: params}, recorded)
+}
+
+func TestSimpleActionExecutionEngineExecuteActionsAnswersAnUnknownActionWithAFailedResult(t *testing.T) {
+	// Given an engine that does not know the action asked for
+	engine := proxias.SimpleActionExecutionEngine{Actions: map[string]proxias.SimpleAction{
+		"some_other_action": mockSimpleAction(someOtherActionDescriptor, proxias.ActionExecutionResult{}, nil),
+	}}
+
+	// When
+	got, err := engine.ExecuteActions(t.Context(), someRequest, []proxias.ActionExecutionIntent{someActionExecutionIntent})
+
+	// Then
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "some_action", got[0].ActionID)
+	assert.Equal(t, "failed", got[0].Status)
+	assert.NotEmpty(t, got[0].ExecutionID)
+	assert.Equal(t, map[string]any{"error": "action not found: some_action"}, got[0].Data)
+}
+
+func TestSimpleActionExecutionEngineExecuteActionsReturnsTheActionsError(t *testing.T) {
+	// Given an action that fails to run
+	engine := proxias.SimpleActionExecutionEngine{Actions: map[string]proxias.SimpleAction{
+		"some_action": mockSimpleAction(someActionDescriptor, proxias.ActionExecutionResult{}, assert.AnError),
+	}}
+
+	// When
+	_, err := engine.ExecuteActions(t.Context(), someRequest, []proxias.ActionExecutionIntent{someActionExecutionIntent})
+
+	// Then
+	assert.ErrorIs(t, err, assert.AnError)
+}

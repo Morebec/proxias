@@ -70,6 +70,7 @@ func TestActionExecutionIntentParameterExtractorExtractParametersSendsTheSchemas
 	require.NoError(t, err)
 	var call struct {
 		System []struct {
+			Text         string            `json:"text"`
 			CacheControl map[string]string `json:"cache_control"`
 		} `json:"system"`
 		Messages []struct {
@@ -79,9 +80,10 @@ func TestActionExecutionIntentParameterExtractorExtractParametersSendsTheSchemas
 		} `json:"messages"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(*sent), &call))
-	assert.Equal(t, "ephemeral", call.System[0].CacheControl["type"], "the instructions never vary: they can be cached")
-	user := call.Messages[0].Content[0].Text
-	assert.Contains(t, user, `"schema":{"required":["service"],"type":"object"}`, "the extractor sees the parameters")
+	require.Len(t, call.System, 2)
+	assert.Equal(t, "ephemeral", call.System[1].CacheControl["type"], "the instructions and the actions never vary: they are cached")
+	assert.NotContains(t, call.Messages[0].Content[0].Text, "schema", "the actions are not in the user turn")
+	assert.Contains(t, call.System[1].Text, `"schema":{"required":["service"],"type":"object"}`, "the extractor sees the parameters")
 }
 
 func TestActionExecutionIntentParameterExtractorExtractParametersWithoutDescriptorsDoesNotCallTheAPI(t *testing.T) {
