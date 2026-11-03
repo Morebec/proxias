@@ -7,28 +7,34 @@ import (
 	"iter"
 )
 
-// Role is who says a message of a conversation with a model.
-type Role string
+// LLMMessageRole is who says a message of a conversation with a model.
+type LLMMessageRole string
 
 const (
-	// RoleUser is everything that happened to the agent.
-	RoleUser Role = "user"
-	// RoleAssistant is the agent.
-	RoleAssistant Role = "assistant"
+	// LLMMessageRoleSystem is the instructions: the strategy's, and the
+	// messages of a system source.
+	LLMMessageRoleSystem LLMMessageRole = "system"
+	// LLMMessageRoleUser is everything that happened to the agent.
+	LLMMessageRoleUser LLMMessageRole = "user"
+	// LLMMessageRoleAssistant is the agent.
+	LLMMessageRoleAssistant LLMMessageRole = "assistant"
+	// LLMMessageRoleTool is the results of the agent's tool calls.
+	LLMMessageRoleTool LLMMessageRole = "tool"
 )
 
-// LLM is a language model, as every strategy sees it: given a system prompt, a conversation and tools, it streams
-// text and tool calls. A vendor adapter implements it (anthropic.NewLLM); a script implements it for tests.
+// LLM is a language model, as every strategy sees it: given a conversation (its
+// instructions as system messages) and tools, it streams text and tool calls. A
+// vendor adapter
+// implements it (anthropic.NewLLM); a script implements it for tests.
 type LLM interface {
 	Complete(ctx context.Context, req LLMRequest) iter.Seq2[LLMChunk, error]
 }
 
 // LLMRequest is what an LLM is asked.
 type LLMRequest struct {
-	// System is the system prompt, in blocks: the stable ones first, so that a model can cache them.
-	System []string
-
-	// Messages is the conversation, oldest first.
+	// Messages is the conversation, oldest first. The system messages that open
+	// it are the instructions: the stable ones first, so that a model can cache
+	// them.
 	Messages []LLMMessage
 
 	// Tools are the actions the model may call, with their JSON Schemas.
@@ -37,12 +43,14 @@ type LLMRequest struct {
 
 // LLMMessage is a message of a conversation with a model.
 type LLMMessage struct {
-	Role  Role
+	Role  LLMMessageRole
 	Parts []LLMPart
 }
 
-// LLMPart is a part of a message: text, a tool call, a tool's result, or the model's thinking (Thinking and its
-// Signature, or RedactedThinking), given back as the model gave it.
+// LLMPart is a part of a message: text, a tool call, a tool's result, or the
+// model's thinking (Thinking and its Signature, or RedactedThinking), given
+// back
+// as the model gave it.
 type LLMPart struct {
 	Text             string
 	ToolCall         *LLMToolCall
@@ -65,55 +73,213 @@ type LLMToolResult struct {
 	Content string
 }
 
-// LLMChunk is a piece of what an LLM streams: a piece of text, a whole tool call, or a whole block of thinking
-// (Thinking and its Signature, or RedactedThinking), which is to be given back as it came.
+// LLMChunk is a piece of what an LLM streams: a piece of text, a whole tool
+// call, or a whole block of thinking (Thinking and its Signature, or
+// RedactedThinking), which is to be given back as it came. When the model
+// stopped (it did not ask for tool calls), the last chunk says why
+// (StopReason),
+// and only that.
 type LLMChunk struct {
 	Text             string
 	ToolCall         *LLMToolCall
 	Thinking         string
 	Signature        string
 	RedactedThinking string
+	StopReason       StopReason `json:",omitempty"`
 }
 
-// NewLLMRequestFromSession is the session as a request of the model of the agent self: its leading messages of a
-// system source are the system prompt, then each event is a message (NewLLMMessage).
-func NewLLMRequestFromSession(s Session, self EventSource) LLMRequest {
+// isThinking tells whether the chunk is a block of thinking, signed or not.
+func (c LLMChunk) isThinking() bool {
+	return c.Thinking != "" || c.Signature != "" || c.RedactedThinking != ""
+}
+
+// NewLLMRequestFromSession creates an LLMRequest from a session.
+func NewLLMRequestFromSession(currentAgentSource EventSource, s Session) LLMRequest {
 	var req LLMRequest
-	leading := true
-	for _, e := range s.Events() {
-		if leading = leading && e.Source.Type == EventSourceTypeSystem && e.Type == EventTypeMessage; leading {
-			req.System = append(req.System, e.Text())
-		} else if m, ok := NewLLMMessage(self, e); ok {
-			req.Messages = append(req.Messages, m)
-		}
+	events := s.Events()
+
+	for _, e := range events {
+		req.Messages = append(req.Messages, NewLLMMessageFromEvent(currentAgentSource, e))
 	}
+
 	return req
 }
 
-// NewLLMMessage is the event as a message of a conversation with the model of the agent self: self's action requests
-// are its tool calls, its thinking (signed) is given back as it came, its other events are its text; the results of
-// actions are tool results, a person's messages text, anything else text tagged with its type and source. ok is false
-// for an event the model is not told: one of self without text.
-func NewLLMMessage(self EventSource, e Event) (m LLMMessage, ok bool) {
-	var (
-		request  ActionExecutionRequest
-		thinking LLMChunk
-		tagged   = fmt.Sprintf("[%s from %s] %s", e.Type, e.Source, e.Text())
-	)
-	switch {
-	case e.Source == self && e.Type == EventTypeActionRequest && json.Unmarshal(e.Payload, &request) == nil:
-		return LLMMessage{Role: RoleAssistant, Parts: []LLMPart{{ToolCall: &LLMToolCall{ID: string(e.ID), Name: request.ActionID, Input: request.Params}}}}, true
-	case e.Source == self && e.Type == EventTypeThought && json.Unmarshal(e.Payload, &thinking) == nil && (thinking.Signature != "" || thinking.RedactedThinking != ""):
-		return LLMMessage{Role: RoleAssistant, Parts: []LLMPart{{Thinking: thinking.Thinking, Signature: thinking.Signature, RedactedThinking: thinking.RedactedThinking}}}, true
-	case e.Source == self && e.Type == EventTypeActionRequest:
-		return LLMMessage{Role: RoleAssistant, Parts: []LLMPart{{Text: tagged}}}, true
-	case e.Source == self:
-		return LLMMessage{Role: RoleAssistant, Parts: []LLMPart{{Text: e.Text()}}}, len(e.Payload) > 0
-	case e.Type == EventTypeActionResult && e.CausationID != "":
-		return LLMMessage{Role: RoleUser, Parts: []LLMPart{{ToolResult: &LLMToolResult{CallID: string(e.CausationID), Content: e.Text()}}}}, true
-	case e.Source.Type == EventSourceTypeUser && e.Type == EventTypeMessage:
-		return LLMMessage{Role: RoleUser, Parts: []LLMPart{{Text: e.Text()}}}, true
+// NewLLMMessageFromEvent creates the message an event is, in the conversation
+// of the model of the current agent: its own events are the assistant's, action
+// results the tool's, a system's messages (its instructions) the system's, a
+// person's messages the user's, and everything else (another agent's events, a
+// system's observations) the user's,
+// tagged with its type and source.
+func NewLLMMessageFromEvent(currentAgentSource EventSource, e Event) LLMMessage {
+	switch e.Type {
+	case EventTypeActionRequest:
+		return newLLMMessageFromActionRequestEvent(currentAgentSource, e)
+	case EventTypeActionResult:
+		return newLLMMessageFromActionResultEvent(e)
+	case EventTypeThought:
+		return newLLMMessageFromThoughtEvent(currentAgentSource, e)
+	case EventTypeMessage:
+		return newLLMMessageFromMessageEvent(currentAgentSource, e)
 	default:
-		return LLMMessage{Role: RoleUser, Parts: []LLMPart{{Text: tagged}}}, len(e.Payload) > 0
+		return newLLMMessageFromUnknownEvent(currentAgentSource, e)
 	}
+}
+
+// newLLMMessageFromActionRequestEvent: the current agent's request is its tool call,
+// or its text, tagged, when it is not a request; another's request is the
+// user's
+// text, tagged.
+func newLLMMessageFromActionRequestEvent(currentAgentSource EventSource, e Event) LLMMessage {
+	tagged := externalTextPayload(e)
+	if e.Source != currentAgentSource {
+		return LLMMessage{
+			Role: LLMMessageRoleUser,
+			Parts: []LLMPart{
+				{Text: tagged},
+			},
+		}
+	}
+
+	var request ActionExecutionRequest
+	err := json.Unmarshal(e.Payload, &request)
+	if err != nil {
+		return LLMMessage{
+			Role: LLMMessageRoleAssistant,
+			Parts: []LLMPart{
+				{Text: tagged},
+			},
+		}
+	}
+
+	return LLMMessage{
+		Role: LLMMessageRoleAssistant,
+		Parts: []LLMPart{
+			{
+				ToolCall: &LLMToolCall{
+					ID:    string(e.ID),
+					Name:  request.ActionID,
+					Input: request.Params,
+				},
+			},
+		},
+	}
+}
+
+// newLLMMessageFromThoughtEvent: the current agent's signed thinking is given back
+// as
+// it came, its other thoughts are its text; another's thought is the user's
+// text, tagged.
+func newLLMMessageFromThoughtEvent(currentAgentSource EventSource, e Event) LLMMessage {
+	if e.Source != currentAgentSource {
+		return LLMMessage{
+			Role: LLMMessageRoleUser,
+			Parts: []LLMPart{
+				{Text: externalTextPayload(e)},
+			},
+		}
+	}
+
+	var chunk LLMChunk
+	err := json.Unmarshal(e.Payload, &chunk)
+	if err != nil || !chunk.isThinking() {
+		return LLMMessage{
+			Role: LLMMessageRoleAssistant,
+			Parts: []LLMPart{
+				{Text: e.Text()},
+			},
+		}
+	}
+
+	part := LLMPart{
+		Thinking:         chunk.Thinking,
+		Signature:        chunk.Signature,
+		RedactedThinking: chunk.RedactedThinking,
+	}
+	return LLMMessage{
+		Role:  LLMMessageRoleAssistant,
+		Parts: []LLMPart{part},
+	}
+}
+
+// newLLMMessageFromActionResultEvent: a result is the tool's, the result of the call
+// it was caused by.
+func newLLMMessageFromActionResultEvent(e Event) LLMMessage {
+	return LLMMessage{
+		Role: LLMMessageRoleTool,
+		Parts: []LLMPart{
+			{
+				ToolResult: &LLMToolResult{
+					CallID:  string(e.CausationID),
+					Content: e.Text(),
+				},
+			},
+		},
+	}
+}
+
+// newLLMMessageFromMessageEvent: the current agent's message is its text, a system's
+// an instruction, a person's the user's text, another's (an agent's) the user's
+// text, tagged.
+func newLLMMessageFromMessageEvent(currentAgentSource EventSource, e Event) LLMMessage {
+	if e.Source == currentAgentSource {
+		return LLMMessage{
+			Role: LLMMessageRoleAssistant,
+			Parts: []LLMPart{
+				{Text: e.Text()},
+			},
+		}
+	}
+
+	if e.HasSourceType(EventSourceTypeSystem) {
+		return LLMMessage{
+			Role: LLMMessageRoleSystem,
+			Parts: []LLMPart{
+				{Text: e.Text()},
+			},
+		}
+	}
+
+	if e.HasSourceType(EventSourceTypeUser) {
+		return LLMMessage{
+			Role: LLMMessageRoleUser,
+			Parts: []LLMPart{
+				{Text: e.Text()},
+			},
+		}
+	}
+
+	return LLMMessage{
+		Role: LLMMessageRoleUser,
+		Parts: []LLMPart{
+			{Text: externalTextPayload(e)},
+		},
+	}
+}
+
+// newLLMMessageFromUnknownEvent: an event of another type (a system's
+// observation, a probe's say, or the app's own) is the user's text, tagged with
+// its type and source (the current agent's, its text).
+func newLLMMessageFromUnknownEvent(currentAgentSource EventSource, e Event) LLMMessage {
+	if e.Source == currentAgentSource {
+		return LLMMessage{
+			Role: LLMMessageRoleAssistant,
+			Parts: []LLMPart{
+				{Text: e.Text()},
+			},
+		}
+	}
+
+	return LLMMessage{
+		Role: LLMMessageRoleUser,
+		Parts: []LLMPart{
+			{Text: externalTextPayload(e)},
+		},
+	}
+}
+
+// externalTextPayload is the event's payload, tagged with its type and source, for
+// the model of another agent.
+func externalTextPayload(e Event) string {
+	return fmt.Sprintf("[%s from %s] %s", e.Type, e.Source, e.Text())
 }

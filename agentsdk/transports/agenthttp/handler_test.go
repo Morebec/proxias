@@ -26,10 +26,14 @@ func TestHandlerPostMessage(t *testing.T) {
 		lines []string
 	}{
 		{
-			name:  "WHEN a message THEN the message, the chunk and the reply stream as NDJSON",
-			when:  `{"from":"john","text":"hello"}`,
-			code:  http.StatusOK,
-			lines: []string{"event user:john hello", "chunk Hi.", "event agent:ada Hi."},
+			name: "WHEN a message THEN the message, the chunk and the reply stream as NDJSON",
+			when: `{"from":"john","text":"hello"}`,
+			code: http.StatusOK,
+			lines: []string{
+				"event user:john hello",
+				"chunk Hi.",
+				"event agent:ada Hi.",
+			},
 		},
 		{
 			name: "WHEN not JSON THEN it is a bad request",
@@ -43,24 +47,57 @@ func TestHandlerPostMessage(t *testing.T) {
 		},
 		{
 			name: "WHEN too large THEN it is rejected",
-			when: `{"from":"john","text":"` + strings.Repeat("a", agenthttp.MaxMessageBytes) + `"}`,
+			when: `{"from":"john","text":"` + strings.Repeat(
+				"a",
+				agenthttp.MaxMessageBytes,
+			) + `"}`,
 			code: http.StatusRequestEntityTooLarge,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					if !yield(agentsdk.StreamUpdate{Chunk: &agentsdk.StreamChunk{EventID: "r", Data: []byte("Hi.")}}) {
-						return
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						if !yield(
+							agentsdk.StreamUpdate{
+								Chunk: &agentsdk.StreamChunk{
+									EventID: "r",
+									Data:    []byte("Hi."),
+								},
+							},
+						) {
+							return
+						}
+						yield(
+							agentsdk.StreamUpdate{
+								Events: []agentsdk.Event{
+									{
+										ID:      "r",
+										Type:    agentsdk.EventTypeMessage,
+										Source:  agentsdk.NewAgentSource("ada"),
+										Payload: []byte("Hi."),
+										Date:    time.Now(),
+									},
+								},
+								StopReason: agentsdk.StopReasonEndTurn,
+							},
+						)
 					}
-					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{{ID: "r", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi."), Date: time.Now()}}, StopReason: agentsdk.StopReasonEndTurn})
-				}
-			})
+				},
+			)
 			handler := agenthttp.NewHandler(agentsdk.Agent{ID: "ada"}, strategy)
 
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/sessions/s1/messages", strings.NewReader(tt.when)))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/sessions/s1/messages",
+					strings.NewReader(tt.when),
+				),
+			)
 
 			assert.Equal(t, tt.code, w.Code)
 			var lines []string
@@ -87,19 +124,44 @@ func TestHandlerGetSession(t *testing.T) {
 		events int
 	}{
 		{name: "GIVEN no message THEN the session is empty", events: 0},
-		{name: "GIVEN messages THEN the session keeps them and the replies", given: []string{"hello", "again"}, events: 4},
+		{
+			name:   "GIVEN messages THEN the session keeps them and the replies",
+			given:  []string{"hello", "again"},
+			events: 4,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Hi."))}, StopReason: agentsdk.StopReasonEndTurn})
-				}
-			})
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						yield(
+							agentsdk.StreamUpdate{
+								Events: []agentsdk.Event{
+									agentsdk.NewEvent(
+										agentsdk.EventTypeMessage,
+										agentsdk.NewAgentSource("ada"),
+										[]byte("Hi."),
+									),
+								},
+								StopReason: agentsdk.StopReasonEndTurn,
+							},
+						)
+					}
+				},
+			)
 			handler := agenthttp.NewHandler(agentsdk.Agent{ID: "ada"}, strategy)
 			for _, text := range tt.given {
 				w := httptest.NewRecorder()
-				handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/sessions/s1/messages", strings.NewReader(`{"from":"john","text":"`+text+`"}`)))
+				handler.ServeHTTP(
+					w,
+					httptest.NewRequestWithContext(
+						t.Context(),
+						http.MethodPost,
+						"/sessions/s1/messages",
+						strings.NewReader(`{"from":"john","text":"`+text+`"}`),
+					),
+				)
 				require.Equal(t, http.StatusOK, w.Code)
 			}
 

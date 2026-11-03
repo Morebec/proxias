@@ -54,37 +54,64 @@ func TestSessionIsImmutable(t *testing.T) {
 	tests := []struct {
 		name  string
 		given []agentsdk.Event
-		// when derives two sessions from the given one, and changes what it can reach of them.
+		// when derives two sessions from the given one, and changes what it can
+		// reach of them.
 		when func(parent agentsdk.Session) (agentsdk.Session, agentsdk.Session)
-		// then are the texts of the parent's events, then of each derived session's.
+		// then are the texts of the parent's events, then of each derived
+		// session's.
 		then [][]string
 	}{
 		{
 			name:  "GIVEN a session WHEN two sessions are derived from it THEN they do not share their events, nor change it",
 			given: []agentsdk.Event{{ID: "1", Payload: []byte("a")}},
 			when: func(parent agentsdk.Session) (agentsdk.Session, agentsdk.Session) {
-				return parent.WithEvents(agentsdk.Event{ID: "2", Payload: []byte("b")}), parent.WithEvents(agentsdk.Event{ID: "3", Payload: []byte("c")})
+				return parent.WithEvents(
+						agentsdk.Event{ID: "2", Payload: []byte("b")},
+					), parent.WithEvents(
+						agentsdk.Event{ID: "3", Payload: []byte("c")},
+					)
 			},
 			then: [][]string{{"a"}, {"a", "b"}, {"a", "c"}},
 		},
 		{
 			name: "GIVEN a session with room to grow WHEN two sessions are derived from it THEN neither writes over the other",
 			given: []agentsdk.Event{
-				{ID: "1", Payload: []byte("a")}, {ID: "2", Payload: []byte("b")}, {ID: "3", Payload: []byte("c")},
+				{
+					ID:      "1",
+					Payload: []byte("a"),
+				}, {ID: "2", Payload: []byte("b")}, {ID: "3", Payload: []byte("c")},
 			},
 			when: func(parent agentsdk.Session) (agentsdk.Session, agentsdk.Session) {
-				grown := parent.WithEvents(agentsdk.Event{ID: "4", Payload: []byte("d")})
-				return grown.WithEvents(agentsdk.Event{ID: "5", Payload: []byte("e")}), grown.WithEvents(agentsdk.Event{ID: "6", Payload: []byte("f")})
+				grown := parent.WithEvents(
+					agentsdk.Event{ID: "4", Payload: []byte("d")},
+				)
+				return grown.WithEvents(
+						agentsdk.Event{ID: "5", Payload: []byte("e")},
+					), grown.WithEvents(
+						agentsdk.Event{ID: "6", Payload: []byte("f")},
+					)
 			},
-			then: [][]string{{"a", "b", "c"}, {"a", "b", "c", "d", "e"}, {"a", "b", "c", "d", "f"}},
+			then: [][]string{
+				{"a", "b", "c"},
+				{"a", "b", "c", "d", "e"},
+				{"a", "b", "c", "d", "f"},
+			},
 		},
 		{
 			name:  "GIVEN a session WHEN the events it gave are changed THEN it is not",
 			given: []agentsdk.Event{{ID: "1", Payload: []byte("a")}},
 			when: func(parent agentsdk.Session) (agentsdk.Session, agentsdk.Session) {
-				parent.Events()[0] = agentsdk.Event{ID: "x", Payload: []byte("x")}
-				derived := parent.WithEvents(agentsdk.Event{ID: "2", Payload: []byte("b")})
-				derived.Events()[1] = agentsdk.Event{ID: "y", Payload: []byte("y")}
+				parent.Events()[0] = agentsdk.Event{
+					ID:      "x",
+					Payload: []byte("x"),
+				}
+				derived := parent.WithEvents(
+					agentsdk.Event{ID: "2", Payload: []byte("b")},
+				)
+				derived.Events()[1] = agentsdk.Event{
+					ID:      "y",
+					Payload: []byte("y"),
+				}
 				return derived, derived
 			},
 			then: [][]string{{"a"}, {"a", "b"}, {"a", "b"}},
@@ -116,7 +143,11 @@ func TestSessionLastEvent(t *testing.T) {
 		then  agentsdk.EventID
 	}{
 		{name: "GIVEN no event THEN it is the zero event", then: ""},
-		{name: "GIVEN events THEN it is the last", given: []agentsdk.Event{{ID: "1"}, {ID: "2"}}, then: "2"},
+		{
+			name:  "GIVEN events THEN it is the last",
+			given: []agentsdk.Event{{ID: "1"}, {ID: "2"}},
+			then:  "2",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

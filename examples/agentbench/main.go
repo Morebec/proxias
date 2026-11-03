@@ -1,11 +1,15 @@
-// Command agentbench compares the strategies on the scenarios of the agent examples: it runs each scenario on each
-// strategy, and tells, per scenario and strategy, how often the task succeeded, the mean and spread of the calls to
-// Claude, their tokens and cost, and the time a run took: in all, to its first action request or reply, per call to
-// Claude, per turn of the scenario's agents, and per stage of the gated strategies (summed over a run; a delegated
-// agent's stages count in the run, inside the execute stage of the agent that asked it).
+// Command agentbench compares the strategies on the scenarios of the agent
+// examples: it runs each scenario on each strategy, and tells, per scenario and
+// strategy, how often the task succeeded, the mean and spread of the calls to
+// Claude, their tokens and cost, and the time a run took: in all, to its first
+// action request or reply, per call to Claude, per turn of the scenario's
+// agents, and per stage of the gated strategies (summed over a run; a delegated
+// agent's stages count in the run, inside the execute stage of the agent that
+// asked it).
 //
-// Runs go -parallel at a time, each with its own agents, sessions and counters. A call is never retried: a rate
-// limit (429) fails its run, and is counted. Concurrent runs may raise the latency of calls.
+// Runs go -parallel at a time, each with its own agents, sessions and counters.
+// A call is never retried: a rate limit (429) fails its run, and is counted.
+// Concurrent runs may raise the latency of calls.
 //
 //	go run ./examples/agentbench                         # one run of each on scripts: checks the bench, costs nothing
 //	go run ./examples/agentbench -runs 10 -parallel 6    # ten runs of each on Claude (billed)
@@ -34,22 +38,41 @@ import (
 )
 
 var (
-	runs       = flag.Int("runs", 0, "runs of each scenario on each strategy, on Claude ("+agentdemo.ClaudeModel+"); 0 runs each once on scripts")
-	parallel   = flag.Int("parallel", 1, "runs at a time")
-	suite      = flag.String("suite", "basic", "the scenarios: basic (the examples', each agent with its own action), or catalog (chat and unattended, the agent with a hundred actions)")
-	strategies = flag.String("strategies", "", "the strategies to compare, comma separated; by default all of them for basic, "+agentdemo.StrategyReAct+" and "+agentdemo.StrategyGated+" for catalog")
-	scenarios  = flag.String("scenarios", "", "the scenarios to run, comma separated; all when empty")
-	verbose    = flag.Bool("v", false, "print the events of each run")
+	runs = flag.Int(
+		"runs",
+		0,
+		"runs of each scenario on each strategy, on Claude ("+
+			agentdemo.ClaudeModel+"); 0 runs each once on scripts",
+	)
+	parallel = flag.Int("parallel", 1, "runs at a time")
+	suite    = flag.String(
+		"suite",
+		"basic",
+		"the scenarios: basic (the examples', each agent with its own "+
+			"action), or catalog (chat and unattended, the agent with a "+
+			"hundred actions)",
+	)
+	strategies = flag.String(
+		"strategies",
+		"",
+		"the strategies to compare, comma separated; by default all of "+
+			"them for basic, "+agentdemo.StrategyReAct+" and "+
+			agentdemo.StrategyGated+" for catalog",
+	)
+	scenarios = flag.String("scenarios", "", "the scenarios to run, comma separated; all when empty")
+	verbose   = flag.Bool("v", false, "print the events of each run")
 )
 
 // scenario is a task an agent is given, and how to tell it succeeded.
 type scenario struct {
 	name string
-	// run runs the task, its agents on the strategy of the run, and tells whether it succeeded, and why not.
+	// run runs the task, its agents on the strategy of the run, and tells
+	// whether it succeeded, and why not.
 	run func(ctx context.Context, r *run) (bool, string, error)
 }
 
-// Prices, in dollars per million tokens: the list prices of Claude Haiku 5.5; cache writes and reads are 1.25 and
+// Prices, in dollars per million tokens: the list prices of Claude Haiku 5.5;
+// cache writes and reads are 1.25 and
 // 0.1 times the input price.
 const (
 	inputPrice      = 0.10
@@ -68,23 +91,32 @@ type measure struct {
 	calls, input, output, cacheWrite, cacheRead, millis float64
 	// perCall is the mean latency of the run's calls to Claude.
 	perCall float64
-	// firstEvent is when the first action request or reply of an agent came, since the run began.
+	// firstEvent is when the first action request or reply of an agent came,
+	// since the run began.
 	firstEvent float64
 	// turns are the turns of the run's agents, and perTurn their mean duration.
 	turns, perTurn float64
-	// stages is the time spent in each stage of the gated strategies, summed over the run.
-	stages map[agentsdk.GatedStage]float64
+	// stages is the time spent in each stage of the gated strategies, summed
+	// over the run.
+	stages map[gatedStage]float64
 	// events are the events of the run, printed with -v.
 	events []string
 }
 
 // dollars is what the run cost, at the list prices.
 func (m measure) dollars() float64 {
-	return (m.input*inputPrice + m.output*outputPrice + m.cacheWrite*cacheWritePrice + m.cacheRead*cacheReadPrice) / 1e6
+	cost := m.input*inputPrice + m.output*outputPrice +
+		m.cacheWrite*cacheWritePrice + m.cacheRead*cacheReadPrice
+	return cost / 1e6
 }
 
 // stages are the stages of the gated strategy, in the order of the table.
-var stages = []agentsdk.GatedStage{agentsdk.GatedClassify, agentsdk.GatedExecute, agentsdk.GatedSynthesize, agentsdk.GatedReasoning}
+var stages = []gatedStage{
+	stageClassify,
+	stageExecute,
+	stageSynthesize,
+	stageReasoning,
+}
 
 // timing records the times and the events of a run as they come.
 type timing struct {
@@ -92,20 +124,27 @@ type timing struct {
 	began      time.Time
 	firstEvent time.Duration
 	turns      []time.Duration
-	stages     map[agentsdk.GatedStage]time.Duration
+	stages     map[gatedStage]time.Duration
 	events     []string
 }
 
 func (t *timing) observe(e agentsdk.Event) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	useful := e.Type == agentsdk.EventTypeActionRequest ||
-		(e.Type == agentsdk.EventTypeMessage && len(e.Payload) > 0)
-	if t.firstEvent == 0 && e.Source.Type == agentsdk.EventSourceTypeAgent && useful {
-		t.firstEvent = time.Since(t.began)
-	}
 	if *verbose {
 		t.events = append(t.events, agentdemo.Line(e))
+	}
+
+	// The first event is the first action request, or the first reply, of an
+	// agent.
+	if t.firstEvent != 0 || !e.HasSourceType(agentsdk.EventSourceTypeAgent) {
+		return
+	}
+	if e.Type == agentsdk.EventTypeActionRequest {
+		t.firstEvent = time.Since(t.began)
+	}
+	if e.Type == agentsdk.EventTypeMessage && len(e.Payload) > 0 {
+		t.firstEvent = time.Since(t.began)
 	}
 }
 
@@ -115,10 +154,10 @@ func (t *timing) cognition(d time.Duration) {
 	t.turns = append(t.turns, d)
 }
 
-func (t *timing) stage(stage agentsdk.GatedStage, d time.Duration) {
+func (t *timing) stage(s gatedStage, d time.Duration) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	t.stages[stage] += d
+	t.stages[s] += d
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -141,16 +180,27 @@ func main() {
 			kinds = agentdemo.StrategyReAct + "," + agentdemo.StrategyGated
 		}
 	}
-	suites := map[string]func() []scenario{"basic": all, "catalog": catalogScenarios}
+	suites := map[string]func() []scenario{
+		"basic":   all,
+		"catalog": catalogScenarios,
+	}
 	of, ok := suites[*suite]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "-suite %q: it is basic or catalog\n", *suite)
 		os.Exit(2)
 	}
 	if *suite == "catalog" {
-		descs, _ := catalogActions(&calls{}).Descriptors(context.Background(), agentsdk.Session{})
+		descs, _ := catalogActions(
+			&calls{},
+		).Descriptors(context.Background(), agentsdk.Session{})
 		data, _ := json.Marshal(descs)
-		fmt.Printf("catalog: %d actions, %d bytes of descriptors with their schemas (about %d tokens)\n\n", len(descs), len(data), len(data)/4)
+		fmt.Printf(
+			"catalog: %d actions, %d bytes of descriptors with their schemas "+
+				"(about %d tokens)\n\n",
+			len(descs),
+			len(data),
+			len(data)/4,
+		)
 	}
 	var cells []cell
 	for _, sc := range of() {
@@ -180,7 +230,13 @@ func main() {
 				measures[c][r] = m
 				if *verbose {
 					print.Lock()
-					fmt.Printf("== %s on %s, run %d\n%s\n", cells[c].scenario.name, cells[c].kind, r+1, strings.Join(m.events, "\n"))
+					fmt.Printf(
+						"== %s on %s, run %d\n%s\n",
+						cells[c].scenario.name,
+						cells[c].kind,
+						r+1,
+						strings.Join(m.events, "\n"),
+					)
 					if !m.ok {
 						fmt.Printf("failed: %s\n", m.why)
 					}
@@ -193,12 +249,18 @@ func main() {
 	report(cells, measures)
 }
 
-// runOnce runs the scenario of the cell once, on its strategy, in an env of its own.
+// runOnce runs the scenario of the cell once, on its strategy, in an env of its
+// own.
 func runOnce(c cell, onClaude bool) measure {
-	t := &timing{stages: map[agentsdk.GatedStage]time.Duration{}}
-	env := agentdemo.Env{Counter: &agentanthropic.UsageCounter{}, StageTimer: t.stage}
+	t := &timing{stages: map[gatedStage]time.Duration{}}
+	env := agentdemo.Env{
+		Counter: &agentanthropic.UsageCounter{},
+	}
 	t.began = time.Now()
-	ok, why, err := c.scenario.run(context.Background(), &run{env: env, kind: c.kind, onClaude: onClaude, t: t})
+	ok, why, err := c.scenario.run(
+		context.Background(),
+		&run{env: env, kind: c.kind, onClaude: onClaude, t: t},
+	)
 	usage := env.Counter.Usage()
 	var apiErr *anthropicsdk.Error
 	rateLimited := errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
@@ -220,7 +282,7 @@ func runOnce(c cell, onClaude bool) measure {
 		millis:      float64(time.Since(t.began).Milliseconds()),
 		firstEvent:  ms(t.firstEvent),
 		turns:       float64(len(t.turns)),
-		stages:      map[agentsdk.GatedStage]float64{},
+		stages:      map[gatedStage]float64{},
 		events:      t.events,
 	}
 	if usage.Calls > 0 {
@@ -242,9 +304,17 @@ func runOnce(c cell, onClaude bool) measure {
 // report prints the tables of the cells, their failures, and the total.
 func report(cells []cell, measures [][]measure) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(w, "scenario\tstrategy\truns\tsuccess\tcalls\tinput tokens\toutput tokens\tcache write\tcache read\tms\t$ per run\t")
+	fmt.Fprintln(
+		w,
+		"scenario\tstrategy\truns\tsuccess\terror rate\tcalls\tinput tokens\toutput "+
+			"tokens\tcache write\tcache read\tms\t$ per run\t",
+	)
 	times := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(times, "scenario\tstrategy\tms\tfirst event ms\tms per call\tturns\tms per turn\tclassify ms\texecute ms\tsynthesize ms\treasoning ms\t")
+	fmt.Fprintln(
+		times,
+		"scenario\tstrategy\tms\tms p50/p90\tfirst event ms\tfirst event p50/p90\tms per call\tturns\tms per "+
+			"turn\tclassify ms\texecute ms\tsynthesize ms\treasoning ms\t",
+	)
 	var (
 		total       measure
 		dollars     float64
@@ -258,7 +328,8 @@ func report(cells []cell, measures [][]measure) {
 			if m.ok {
 				succeeded++
 			} else {
-				failures[fmt.Sprintf("%s on %s: %s", cell.scenario.name, cell.kind, m.why)]++
+				failure := fmt.Sprintf("%s on %s: %s", cell.scenario.name, cell.kind, m.why)
+				failures[failure]++
 			}
 			if m.rateLimited {
 				rateLimited++
@@ -270,32 +341,58 @@ func report(cells []cell, measures [][]measure) {
 			total.cacheRead += m.cacheRead
 			dollars += m.dollars()
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d\t%d/%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n", cell.scenario.name, cell.kind, len(ms), succeeded, len(ms),
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%d\t%d/%d\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
+			cell.scenario.name,
+			cell.kind,
+			len(ms),
+			succeeded,
+			len(ms),
+			100*float64(len(ms)-succeeded)/float64(len(ms)),
 			stat(ms, func(m measure) float64 { return m.calls }),
 			stat(ms, func(m measure) float64 { return m.input }),
 			stat(ms, func(m measure) float64 { return m.output }),
 			stat(ms, func(m measure) float64 { return m.cacheWrite }),
 			stat(ms, func(m measure) float64 { return m.cacheRead }),
 			stat(ms, func(m measure) float64 { return m.millis }),
-			dollarStat(ms))
+			dollarStat(ms),
+		)
 		row := make([]string, 0, 7+len(stages))
 		row = append(row, cell.scenario.name, cell.kind,
 			stat(ms, func(m measure) float64 { return m.millis }),
+			percentiles(ms, func(m measure) float64 { return m.millis }),
 			stat(ms, func(m measure) float64 { return m.firstEvent }),
+			percentiles(ms, func(m measure) float64 { return m.firstEvent }),
 			stat(ms, func(m measure) float64 { return m.perCall }),
 			stat(ms, func(m measure) float64 { return m.turns }),
 			stat(ms, func(m measure) float64 { return m.perTurn }),
 		)
 		for _, stage := range stages {
-			row = append(row, stat(ms, func(m measure) float64 { return m.stages[stage] }))
+			row = append(
+				row,
+				stat(ms, func(m measure) float64 { return m.stages[stage] }),
+			)
 		}
 		fmt.Fprintln(times, strings.Join(row, "\t")+"\t")
 	}
 	_ = w.Flush()
 	fmt.Println()
 	_ = times.Flush()
-	fmt.Printf("\ntotal: %.0f calls, %.0f input, %.0f output, %.0f cache write, %.0f cache read tokens: $%.4f at list prices; %d runs failed on a rate limit (429)\n",
-		total.calls, total.input, total.output, total.cacheWrite, total.cacheRead, dollars, rateLimited)
+	fmt.Println()
+	reportStrategies(cells, measures)
+	fmt.Printf(
+		"\ntotal: %.0f calls, %.0f input, %.0f output, %.0f cache write, "+
+			"%.0f cache read tokens: $%.4f at list prices; %d runs failed on "+
+			"a rate limit (429)\n",
+		total.calls,
+		total.input,
+		total.output,
+		total.cacheWrite,
+		total.cacheRead,
+		dollars,
+		rateLimited,
+	)
 	keys := make([]string, 0, len(failures))
 	for k := range failures {
 		keys = append(keys, k)
@@ -304,6 +401,72 @@ func report(cells []cell, measures [][]measure) {
 	for _, k := range keys {
 		fmt.Printf("%4d failed: %s\n", failures[k], k)
 	}
+}
+
+// reportStrategies prints the totals of each strategy, over its cells: its
+// runs, how many failed, its tokens, and the times of its runs.
+func reportStrategies(cells []cell, measures [][]measure) {
+	var kinds []string
+	of := map[string][]measure{}
+	for c, cell := range cells {
+		if _, ok := of[cell.kind]; !ok {
+			kinds = append(kinds, cell.kind)
+		}
+		of[cell.kind] = append(of[cell.kind], measures[c]...)
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
+	fmt.Fprintln(w, "strategy\truns\tfailed\terror rate\tinput tokens\toutput tokens\tcache write\tcache read\t"+
+		"ms\tms p50/p90\tfirst event ms\tfirst event p50/p90\t$\t")
+	for _, kind := range kinds {
+		ms := of[kind]
+		var total measure
+		var failed int
+		var dollars float64
+		for _, m := range ms {
+			if !m.ok {
+				failed++
+			}
+			total.input += m.input
+			total.output += m.output
+			total.cacheWrite += m.cacheWrite
+			total.cacheRead += m.cacheRead
+			dollars += m.dollars()
+		}
+		fmt.Fprintf(
+			w,
+			"%s\t%d\t%d\t%.0f%%\t%.0f\t%.0f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%.4f\t\n",
+			kind,
+			len(ms),
+			failed,
+			100*float64(failed)/float64(len(ms)),
+			total.input,
+			total.output,
+			total.cacheWrite,
+			total.cacheRead,
+			stat(ms, func(m measure) float64 { return m.millis }),
+			percentiles(ms, func(m measure) float64 { return m.millis }),
+			stat(ms, func(m measure) float64 { return m.firstEvent }),
+			percentiles(ms, func(m measure) float64 { return m.firstEvent }),
+			dollars,
+		)
+	}
+	_ = w.Flush()
+}
+
+// percentiles is the p50 and the p90 of the value of the measures, the
+// nearest rank.
+func percentiles(measures []measure, value func(measure) float64) string {
+	values := make([]float64, 0, len(measures))
+	for _, m := range measures {
+		values = append(values, value(m))
+	}
+	slices.Sort(values)
+	rank := func(p float64) float64 {
+		i := int(math.Ceil(p*float64(len(values)))) - 1
+		return values[max(i, 0)]
+	}
+	return fmt.Sprintf("%.0f / %.0f", rank(0.5), rank(0.9))
 }
 
 // dollarStat is the mean ± the standard deviation of what the measures cost.
@@ -316,7 +479,8 @@ func stat(measures []measure, value func(measure) float64) string {
 	return spread(measures, value, "%.0f ± %.0f")
 }
 
-// spread formats the mean and the standard deviation of the value of the measures.
+// spread formats the mean and the standard deviation of the value of the
+// measures.
 func spread(measures []measure, value func(measure) float64, format string) string {
 	var sum float64
 	for _, m := range measures {

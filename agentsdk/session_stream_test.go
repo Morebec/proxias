@@ -18,16 +18,42 @@ func TestSessionStreamUpdates(t *testing.T) {
 		name  string
 		given []agentsdk.StreamUpdate
 		err   error
-		// then are the updates read; session, the texts of the stream's session once they are read to their end.
+		// then are the updates read; session, the texts of the stream's session
+		// once they are read to their end.
 		then    []string
 		session []string
 	}{
 		{
 			name: "GIVEN updates THEN they are read as sent, and the session holds their events",
 			given: []agentsdk.StreamUpdate{
-				{Chunk: &agentsdk.StreamChunk{EventID: "a", Data: []byte("Hi")}},
-				{Events: []agentsdk.Event{{ID: "a", Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi"), Date: time.Now()}}},
-				{Events: []agentsdk.Event{{ID: "b", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Bye"), Date: time.Now()}}},
+				{
+					Chunk: &agentsdk.StreamChunk{
+						EventID: "a",
+						Data:    []byte("Hi"),
+					},
+				},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "a",
+							Type:    agentsdk.EventTypeThought,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Hi"),
+							Date:    time.Now(),
+						},
+					},
+				},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "b",
+							Type:    agentsdk.EventTypeMessage,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Bye"),
+							Date:    time.Now(),
+						},
+					},
+				},
 			},
 			then:    []string{"chunk Hi", "event Hi", "event Bye"},
 			session: []string{"hello", "Hi", "Bye"},
@@ -35,7 +61,17 @@ func TestSessionStreamUpdates(t *testing.T) {
 		{
 			name: "GIVEN an error THEN the last update carries it, and the session the events before it",
 			given: []agentsdk.StreamUpdate{
-				{Events: []agentsdk.Event{{ID: "a", Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi"), Date: time.Now()}}},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "a",
+							Type:    agentsdk.EventTypeThought,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Hi"),
+							Date:    time.Now(),
+						},
+					},
+				},
 			},
 			err:     errors.New("down"),
 			then:    []string{"event Hi", "error down"},
@@ -44,19 +80,25 @@ func TestSessionStreamUpdates(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					for _, u := range tt.given {
-						if !yield(u) {
-							return
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						for _, u := range tt.given {
+							if !yield(u) {
+								return
+							}
+						}
+						if tt.err != nil {
+							yield(agentsdk.StreamUpdate{Err: tt.err})
 						}
 					}
-					if tt.err != nil {
-						yield(agentsdk.StreamUpdate{Err: tt.err})
-					}
-				}
-			})
-			stream, err := (&agentsdk.Agent{ID: "ada"}).Invoke(context.Background(), agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")), strategy)
+				},
+			)
+			stream, err := (&agentsdk.Agent{ID: "ada"}).Invoke(
+				context.Background(),
+				agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")),
+				strategy,
+			)
 			require.NoError(t, err)
 
 			var got []string
@@ -86,22 +128,42 @@ func TestSessionStreamSessionWhileRunning(t *testing.T) {
 		name  string
 		turns int
 	}{
-		{name: "GIVEN a loop of many turns WHEN its session is read while it runs THEN it is safe, and grows to the final one", turns: 8},
+		{
+			name:  "GIVEN a loop of many turns WHEN its session is read while it runs THEN it is safe, and grows to the final one",
+			turns: 8,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			turn := 0
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					turn++
-					var stop agentsdk.StopReason
-					if turn == tt.turns {
-						stop = agentsdk.StopReasonEndTurn
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						turn++
+						var stop agentsdk.StopReason
+						if turn == tt.turns {
+							stop = agentsdk.StopReasonEndTurn
+						}
+						yield(
+							agentsdk.StreamUpdate{
+								Events: []agentsdk.Event{
+									agentsdk.NewEvent(
+										agentsdk.EventTypeThought,
+										agentsdk.NewAgentSource("ada"),
+										[]byte("turn"),
+									),
+								},
+								StopReason: stop,
+							},
+						)
 					}
-					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeThought, agentsdk.NewAgentSource("ada"), []byte("turn"))}, StopReason: stop})
-				}
-			})
-			stream, err := (&agentsdk.Agent{ID: "ada"}).Loop(context.Background(), agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")), strategy)
+				},
+			)
+			stream, err := (&agentsdk.Agent{ID: "ada"}).Loop(
+				context.Background(),
+				agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")),
+				strategy,
+			)
 			require.NoError(t, err)
 
 			done := make(chan struct{})
@@ -133,8 +195,23 @@ func TestSessionStreamCollect(t *testing.T) {
 		{
 			name: "GIVEN updates THEN it is the final session, the events added after the session given",
 			given: []agentsdk.StreamUpdate{
-				{Chunk: &agentsdk.StreamChunk{EventID: "a", Data: []byte("Hi")}},
-				{Events: []agentsdk.Event{{ID: "a", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi"), Date: time.Now()}}},
+				{
+					Chunk: &agentsdk.StreamChunk{
+						EventID: "a",
+						Data:    []byte("Hi"),
+					},
+				},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "a",
+							Type:    agentsdk.EventTypeMessage,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Hi"),
+							Date:    time.Now(),
+						},
+					},
+				},
 			},
 			then:  []string{"hello", "Hi"},
 			added: []string{"Hi"},
@@ -147,7 +224,17 @@ func TestSessionStreamCollect(t *testing.T) {
 		{
 			name: "GIVEN an error THEN it is the error, and the session so far",
 			given: []agentsdk.StreamUpdate{
-				{Events: []agentsdk.Event{{ID: "a", Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi"), Date: time.Now()}}},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "a",
+							Type:    agentsdk.EventTypeThought,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Hi"),
+							Date:    time.Now(),
+						},
+					},
+				},
 			},
 			err:   errors.New("down"),
 			then:  []string{"hello", "Hi"},
@@ -156,20 +243,26 @@ func TestSessionStreamCollect(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					for _, d := range tt.given {
-						if !yield(d) {
-							return
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						for _, d := range tt.given {
+							if !yield(d) {
+								return
+							}
+						}
+						if tt.err != nil {
+							yield(agentsdk.StreamUpdate{Err: tt.err})
 						}
 					}
-					if tt.err != nil {
-						yield(agentsdk.StreamUpdate{Err: tt.err})
-					}
-				}
-			})
+				},
+			)
 			start := agentsdk.NewSessionWithID("s1", agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello"))
-			stream, err := (&agentsdk.Agent{ID: "ada"}).Invoke(context.Background(), start, strategy)
+			stream, err := (&agentsdk.Agent{ID: "ada"}).Invoke(
+				context.Background(),
+				start,
+				strategy,
+			)
 			require.NoError(t, err)
 
 			s, err := stream.Collect()
@@ -199,15 +292,32 @@ func TestSessionStreamCollect(t *testing.T) {
 func TestSessionStreamMatchesTheAgentsSession(t *testing.T) {
 	tests := []struct {
 		name string
-		// turns are what each turn adds; the last turn's session is the agent's own, as it holds it.
+		// turns are what each turn adds; the last turn's session is the agent's
+		// own, as it holds it.
 		turns [][]agentsdk.Event
 		when  func(agentsdk.Agent, agentsdk.Session, agentsdk.CognitiveStrategy) (*agentsdk.SessionStream, error)
 	}{
 		{
 			name: "GIVEN a loop of two turns THEN the stream's session is the agent's, same events, same parents",
 			turns: [][]agentsdk.Event{
-				{{ID: "t", Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Thinking."), Date: time.Now()}},
-				{{ID: "r", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Done."), Date: time.Now()}},
+				{
+					{
+						ID:      "t",
+						Type:    agentsdk.EventTypeThought,
+						Source:  agentsdk.NewAgentSource("ada"),
+						Payload: []byte("Thinking."),
+						Date:    time.Now(),
+					},
+				},
+				{
+					{
+						ID:      "r",
+						Type:    agentsdk.EventTypeMessage,
+						Source:  agentsdk.NewAgentSource("ada"),
+						Payload: []byte("Done."),
+						Date:    time.Now(),
+					},
+				},
 			},
 			when: func(a agentsdk.Agent, s agentsdk.Session, strategy agentsdk.CognitiveStrategy) (*agentsdk.SessionStream, error) {
 				return a.Loop(context.Background(), s, strategy)
@@ -217,10 +327,33 @@ func TestSessionStreamMatchesTheAgentsSession(t *testing.T) {
 			name: "GIVEN a loop whose turn ends on an action's result THEN the result is in both sessions, chained alike",
 			turns: [][]agentsdk.Event{
 				{
-					{ID: "q", Type: agentsdk.EventTypeActionRequest, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`{"action_id":"echo"}`), Date: time.Now()},
-					{ID: "a", CausationID: "q", Type: agentsdk.EventTypeActionResult, Source: agentsdk.NewSystemSource("actions"), Payload: []byte(`{"action_id":"echo","status":"completed"}`), Date: time.Now()},
+					{
+						ID:      "q",
+						Type:    agentsdk.EventTypeActionRequest,
+						Source:  agentsdk.NewAgentSource("ada"),
+						Payload: []byte(`{"action_id":"echo"}`),
+						Date:    time.Now(),
+					},
+					{
+						ID:          "a",
+						CausationID: "q",
+						Type:        agentsdk.EventTypeActionResult,
+						Source:      agentsdk.NewSystemSource("actions"),
+						Payload: []byte(
+							`{"action_id":"echo","status":"completed"}`,
+						),
+						Date: time.Now(),
+					},
 				},
-				{{ID: "r", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Echoed."), Date: time.Now()}},
+				{
+					{
+						ID:      "r",
+						Type:    agentsdk.EventTypeMessage,
+						Source:  agentsdk.NewAgentSource("ada"),
+						Payload: []byte("Echoed."),
+						Date:    time.Now(),
+					},
+				},
 			},
 			when: func(a agentsdk.Agent, s agentsdk.Session, strategy agentsdk.CognitiveStrategy) (*agentsdk.SessionStream, error) {
 				return a.Loop(context.Background(), s, strategy)
@@ -233,27 +366,43 @@ func TestSessionStreamMatchesTheAgentsSession(t *testing.T) {
 				turn int
 				seen agentsdk.Session
 			)
-			strategy := agentsdk.StrategyFunc(func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					if turn < len(tt.turns) {
-						seen = inv.Session
-						turn++
-						var stop agentsdk.StopReason
-						if turn == len(tt.turns) {
-							stop = agentsdk.StopReasonEndTurn
+			strategy := agentsdk.StrategyFunc(
+				func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						if turn < len(tt.turns) {
+							seen = inv.Session
+							turn++
+							var stop agentsdk.StopReason
+							if turn == len(tt.turns) {
+								stop = agentsdk.StopReasonEndTurn
+							}
+							yield(
+								agentsdk.StreamUpdate{
+									Events:     tt.turns[turn-1],
+									StopReason: stop,
+								},
+							)
 						}
-						yield(agentsdk.StreamUpdate{Events: tt.turns[turn-1], StopReason: stop})
 					}
-				}
-			})
-			stream, err := tt.when(agentsdk.Agent{ID: "ada"}, agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")), strategy)
+				},
+			)
+			stream, err := tt.when(
+				agentsdk.Agent{ID: "ada"},
+				agentsdk.NewSession(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "hello")),
+				strategy,
+			)
 			require.NoError(t, err)
 
 			s, err := stream.Collect()
 
 			require.NoError(t, err)
 			require.Greater(t, len(s.Events()), len(seen.Events()))
-			assert.Equal(t, seen.Events(), s.Events()[:len(seen.Events())], "the agent's session, as the last turn was given it, begins the stream's")
+			assert.Equal(
+				t,
+				seen.Events(),
+				s.Events()[:len(seen.Events())],
+				"the agent's session, as the last turn was given it, begins the stream's",
+			)
 			for i, e := range s.Events()[1:] {
 				assert.Equal(t, s.Events()[i].ID, e.ParentID, "each event follows the one before it")
 			}

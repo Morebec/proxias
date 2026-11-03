@@ -25,7 +25,8 @@ func TestLLMSystem1(t *testing.T) {
 		answer   string
 		then     any
 		question string
-		// prompt is the prompt of the kind of question, system the system prompt the model is told.
+		// prompt is the prompt of the kind of question, system the system
+		// prompt the model is told.
 		prompt, system string
 		wantErr        bool
 	}{
@@ -39,18 +40,26 @@ func TestLLMSystem1(t *testing.T) {
 			question: `{\"instructions\":\"The last event asks for an action.\"}`,
 		},
 		{
-			name:     "GIVEN a choice THEN the answer is the option, its probabilities and the confidence",
-			kind:     "choice",
-			answer:   `{"choice":"echo","probabilities":{"echo":0.8,"page":0.2},"confidence":0.8}`,
-			then:     agentsdk.System1ChoiceAnswer{Choice: "echo", Probabilities: map[string]float64{"echo": 0.8, "page": 0.2}, Confidence: 0.8},
+			name:   "GIVEN a choice THEN the answer is the option, its probabilities and the confidence",
+			kind:   "choice",
+			answer: `{"choice":"echo","probabilities":{"echo":0.8,"page":0.2},"confidence":0.8}`,
+			then: agentsdk.System1ChoiceAnswer{
+				Choice:        "echo",
+				Probabilities: map[string]float64{"echo": 0.8, "page": 0.2},
+				Confidence:    0.8,
+			},
 			system:   adapters.DefaultChoicePrompt,
 			question: `{\"instructions\":\"The action asked for.\",\"criteria\":{\"echo\":\"Echoes.\",\"page\":\"Pages.\"}}`,
 		},
 		{
-			name:     "GIVEN a score THEN the answer is the score from 0 to 1, its probabilities and the confidence",
-			kind:     "score",
-			answer:   `{"score":0.67,"probabilities":{"low":0.1,"high":0.9},"confidence":0.9}`,
-			then:     agentsdk.System1ScoreAnswer{Score: 0.67, Probabilities: map[string]float64{"low": 0.1, "high": 0.9}, Confidence: 0.9},
+			name:   "GIVEN a score THEN the answer is the score from 0 to 1, its probabilities and the confidence",
+			kind:   "score",
+			answer: `{"score":0.67,"probabilities":{"low":0.1,"high":0.9},"confidence":0.9}`,
+			then: agentsdk.System1ScoreAnswer{
+				Score:         0.67,
+				Probabilities: map[string]float64{"low": 0.1, "high": 0.9},
+				Confidence:    0.9,
+			},
 			system:   adapters.DefaultScorePrompt,
 			question: `{\"instructions\":\"How urgent it is.\",\"criteria\":{\"high\":\"Urgent.\",\"low\":\"Not urgent.\"}}`,
 		},
@@ -92,15 +101,30 @@ func TestLLMSystem1(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var told map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewDecoder(r.Body).Decode(&told)
-				text, _ := json.Marshal(tt.answer)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":` + string(text) + `}]}`))
-			}))
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewDecoder(r.Body).Decode(&told)
+					text, _ := json.Marshal(tt.answer)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write(
+						[]byte(
+							`{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":` + string(
+								text,
+							) + `}]}`,
+						),
+					)
+				}),
+			)
 			defer server.Close()
 			system1 := adapters.LLMSystem1{
-				LLM:          agentanthropic.NewLLM(anthropicsdk.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test"), option.WithMaxRetries(0)), "m"),
+				LLM: agentanthropic.NewLLM(
+					anthropicsdk.NewClient(
+						option.WithBaseURL(server.URL),
+						option.WithAPIKey("test"),
+						option.WithMaxRetries(0),
+					),
+					"m",
+				),
 				ChoicePrompt: tt.prompt, ScorePrompt: tt.prompt, NoulPrompt: tt.prompt,
 			}
 
@@ -110,11 +134,37 @@ func TestLLMSystem1(t *testing.T) {
 			)
 			switch tt.kind {
 			case "choice":
-				answer, err = system1.AnswerChoice(context.Background(), "john: echo hi", agentsdk.System1Question{Instructions: "The action asked for.", Criteria: map[string]string{"echo": "Echoes.", "page": "Pages."}})
+				answer, err = system1.AnswerChoice(
+					context.Background(),
+					"john: echo hi",
+					agentsdk.System1Question{
+						Instructions: "The action asked for.",
+						Criteria: map[string]string{
+							"echo": "Echoes.",
+							"page": "Pages.",
+						},
+					},
+				)
 			case "score":
-				answer, err = system1.AnswerScore(context.Background(), "john: echo hi", agentsdk.System1Question{Instructions: "How urgent it is.", Criteria: map[string]string{"low": "Not urgent.", "high": "Urgent."}})
+				answer, err = system1.AnswerScore(
+					context.Background(),
+					"john: echo hi",
+					agentsdk.System1Question{
+						Instructions: "How urgent it is.",
+						Criteria: map[string]string{
+							"low":  "Not urgent.",
+							"high": "Urgent.",
+						},
+					},
+				)
 			case "noul":
-				answer, err = system1.AnswerNoul(context.Background(), "john: echo hi", agentsdk.System1Question{Instructions: "The last event asks for an action."})
+				answer, err = system1.AnswerNoul(
+					context.Background(),
+					"john: echo hi",
+					agentsdk.System1Question{
+						Instructions: "The last event asks for an action.",
+					},
+				)
 			}
 
 			if tt.wantErr {

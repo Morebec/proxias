@@ -1,4 +1,5 @@
-// Package agentdemo is what the agent examples share: the shell they run on (-shell, -claude), and how they print
+// Package agentdemo is what the agent examples share: the shell they run on
+// (-shell, -claude), and how they print
 // events.
 package agentdemo
 
@@ -12,7 +13,10 @@ import (
 	"github.com/morebec/proxias/agentsdk"
 )
 
-// devKey is the development key the examples set ANTHROPIC_API_KEY to when it is not set.
+// devKey is the development key the examples set ANTHROPIC_API_KEY to when it
+// is not set.
+//
+//nolint:lll // a key is one token
 const devKey = "REMOVED-API-KEY"
 
 // ClaudeModel is the model of the examples on Claude: the cheapest.
@@ -23,7 +27,8 @@ var claude = flag.Bool("claude", false, "run on Claude ("+ClaudeModel+", ANTHROP
 // Print prints an event on one line (Line).
 func Print(e agentsdk.Event) { fmt.Println(Line(e)) }
 
-// Line is an event on one line, in color on a terminal (unless NO_COLOR is set): the source by who it is (each agent
+// Line is an event on one line, in color on a terminal (unless NO_COLOR is
+// set): the source by who it is (each agent
 // its own color), the event by its type.
 func Line(e agentsdk.Event) string {
 	source := fmt.Sprintf("%-22s", e.Source)
@@ -37,7 +42,8 @@ func Line(e agentsdk.Event) string {
 	return source + " " + kind + " " + text
 }
 
-// colored tells whether to print in color: on a terminal, unless NO_COLOR is set (https://no-color.org).
+// colored tells whether to print in color: on a terminal, unless NO_COLOR is
+// set (https://no-color.org).
 var colored = func() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
@@ -60,7 +66,14 @@ const (
 )
 
 // agentColors are the colors of the agents, each agent always the same one.
-var agentColors = []string{"\033[36m", "\033[96m", "\033[94m", "\033[95m", "\033[92m", "\033[93m"}
+var agentColors = []string{
+	"\033[36m",
+	"\033[96m",
+	"\033[94m",
+	"\033[95m",
+	"\033[92m",
+	"\033[93m",
+}
 
 func paint(style, text string) string {
 	if style == "" {
@@ -78,7 +91,8 @@ func sourceColor(s agentsdk.EventSource) string {
 		for _, r := range s.ID {
 			hash = hash*31 + int(r)
 		}
-		return bold + agentColors[(hash%len(agentColors)+len(agentColors))%len(agentColors)]
+		n := len(agentColors)
+		return bold + agentColors[(hash%n+n)%n]
 	default:
 		return yellow
 	}

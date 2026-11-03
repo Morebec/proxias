@@ -13,10 +13,19 @@ type CognitiveStrategy interface {
 	Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate]
 }
 
-// Invocation is what a turn is given: the agent, its session, and the mode it is invoked in.
+// Invocation is what a turn is given: the agent, its session, and the mode it
+// is invoked in.
 type Invocation struct {
 	Agent   Agent
 	Session Session
+	// Memories are what the agent's memory recalled for the turn: not events of
+	// the session.
+	Memories []Event
+}
+
+// LastEvent is the last event of the invocation's session.
+func (inv Invocation) LastEvent() Event {
+	return inv.Session.LastEvent()
 }
 
 // StrategyFunc is a function as a CognitiveStrategy.
@@ -27,6 +36,7 @@ func (f StrategyFunc) Invoke(ctx context.Context, inv Invocation) iter.Seq[Strea
 	return f(ctx, inv)
 }
 
-// AgentMiddleware wraps every turn of an agent, whatever the strategy (Agent.Middleware): it may add to the session it is
-// given (an event, a system message), change or filter what the turn adds, time it, guard it...
+// AgentMiddleware wraps every turn of an agent, whatever the strategy
+// (Agent.Middleware): it may add to the session it is given (an event, a system
+// message), change or filter what the turn adds, time it, guard it...
 type AgentMiddleware func(next CognitiveStrategy) CognitiveStrategy

@@ -13,6 +13,7 @@ linters:
     - errorlint
     - gocritic
     - gosec
+    - lll
     - misspell
     - nilerr
     - noctx
@@ -23,6 +24,9 @@ linters:
     - unparam
     - usestdlibvars
   settings:
+    lll:
+      line-length: 120
+      tab-width: 4
     revive:
       rules:
         # An SDK is read by its exported API: keep it documented.
@@ -47,6 +51,23 @@ linters:
       - std-error-handling
       - common-false-positives
     rules:
+      # Lines of 80 columns are agentsdk's style; the rest of Proxias keeps its
+      # own.
+      - path-except: ^(agentsdk|examples/(agent-chat|agent-cli|agent-team|agent-unattended|agentbench|agentdemo))/
+        linters:
+          - lll
+      # A test table's fixtures (JSON, answers) and a doc comment's code block
+      # are what they are: wrapping them would change them.
+      - path: _test\.go
+        linters:
+          - lll
+      - source: ^\s*//\t
+        linters:
+          - lll
+      # The prompts' lines are their text.
+      - path: ^agentsdk/(adapters/)?prompts\.go$
+        linters:
+          - lll
       - path: _test\.go
         linters:
           - gosec

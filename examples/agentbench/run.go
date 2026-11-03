@@ -11,7 +11,8 @@ import (
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
-// run is a run of a scenario on a strategy: what it builds its strategies with, and what it times.
+// run is a run of a scenario on a strategy: what it builds its strategies with,
+// and what it times.
 type run struct {
 	env      agentdemo.Env
 	kind     string
@@ -21,29 +22,34 @@ type run struct {
 
 // strategy is the strategy of the run, on the script or on Claude.
 func (r *run) strategy(script agentdemo.Script) agentsdk.CognitiveStrategy {
-	return r.env.StrategyOf(r.kind, r.onClaude, script)
+	return timedStages(r.env.StrategyOf(r.kind, r.onClaude, script), r.t)
 }
 
-// timed is the agent with its turns timed: a middleware of the bench.
-func (r *run) timed(a agentsdk.Agent) agentsdk.Agent {
+// timed is the agent with its turns timed (a middleware of the bench), and its
+// executions when its strategy is gated.
+func (r *run) timed(a agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.Agent {
+	a = timedExecution(a, strategy, r.t)
 	timer := func(next agentsdk.CognitiveStrategy) agentsdk.CognitiveStrategy {
-		return agentsdk.StrategyFunc(func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-			return func(yield func(agentsdk.StreamUpdate) bool) {
-				began := time.Now()
-				defer func() { r.t.cognition(time.Since(began)) }()
-				for u := range next.Invoke(ctx, inv) {
-					if !yield(u) {
-						return
+		return agentsdk.StrategyFunc(
+			func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+				return func(yield func(agentsdk.StreamUpdate) bool) {
+					began := time.Now()
+					defer func() { r.t.cognition(time.Since(began)) }()
+					for u := range next.Invoke(ctx, inv) {
+						if !yield(u) {
+							return
+						}
 					}
 				}
-			}
-		})
+			},
+		)
 	}
 	a.Middleware = append(slices.Clip(a.Middleware), timer)
 	return a
 }
 
-// observe observes the stream to its end, and returns the last session, the events added, and its error.
+// observe observes the stream to its end, and returns the last session, the
+// events added, and its error.
 func (r *run) observe(stream *agentsdk.SessionStream) (agentsdk.Session, []agentsdk.Event, error) {
 	var (
 		events []agentsdk.Event
@@ -62,8 +68,13 @@ func (r *run) observe(stream *agentsdk.SessionStream) (agentsdk.Session, []agent
 }
 
 // loop has the agent Loop on the session.
-func (r *run) loop(ctx context.Context, a agentsdk.Agent, s agentsdk.Session, strategy agentsdk.CognitiveStrategy) (agentsdk.Session, []agentsdk.Event, error) {
-	timed := r.timed(a)
+func (r *run) loop(
+	ctx context.Context,
+	a agentsdk.Agent,
+	s agentsdk.Session,
+	strategy agentsdk.CognitiveStrategy,
+) (agentsdk.Session, []agentsdk.Event, error) {
+	timed := r.timed(a, strategy)
 	stream, err := timed.Loop(ctx, s, strategy)
 	if err != nil {
 		return s, nil, err
@@ -71,8 +82,14 @@ func (r *run) loop(ctx context.Context, a agentsdk.Agent, s agentsdk.Session, st
 	return r.observe(stream)
 }
 
-// chat has john say the texts to the agent, in one session, a Loop each, and returns the reply to the last.
-func (r *run) chat(ctx context.Context, a agentsdk.Agent, strategy agentsdk.CognitiveStrategy, texts ...string) (string, error) {
+// chat has john say the texts to the agent, in one session, a Loop each, and
+// returns the reply to the last.
+func (r *run) chat(
+	ctx context.Context,
+	a agentsdk.Agent,
+	strategy agentsdk.CognitiveStrategy,
+	texts ...string,
+) (string, error) {
 	s := agentsdk.NewSession()
 	var reply string
 	for _, text := range texts {
@@ -80,7 +97,9 @@ func (r *run) chat(ctx context.Context, a agentsdk.Agent, strategy agentsdk.Cogn
 			events []agentsdk.Event
 			err    error
 		)
-		if s, events, err = r.loop(ctx, a, s.WithEvents(agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), text)), strategy); err != nil {
+		john := agentsdk.NewUserSource("john")
+		s = s.WithEvents(agentsdk.NewMessageEvent(john, text))
+		if s, events, err = r.loop(ctx, a, s, strategy); err != nil {
 			return "", err
 		}
 		reply = agentdemo.Reply(events)
@@ -88,14 +107,20 @@ func (r *run) chat(ctx context.Context, a agentsdk.Agent, strategy agentsdk.Cogn
 	return reply, nil
 }
 
-// watch has the agent Watch the events, given in order, unattended, and returns the events of the session.
-func (r *run) watch(ctx context.Context, a agentsdk.Agent, strategy agentsdk.CognitiveStrategy, events ...agentsdk.Event) ([]agentsdk.Event, error) {
+// watch has the agent Watch the events, given in order, unattended, and returns
+// the events of the session.
+func (r *run) watch(
+	ctx context.Context,
+	a agentsdk.Agent,
+	strategy agentsdk.CognitiveStrategy,
+	events ...agentsdk.Event,
+) ([]agentsdk.Event, error) {
 	incoming := make(chan agentsdk.Event, len(events))
 	for _, e := range events {
 		incoming <- e
 	}
 	close(incoming)
-	timed := r.timed(a)
+	timed := r.timed(a, strategy)
 	stream, err := timed.Watch(ctx, agentsdk.NewSession(), incoming, strategy)
 	if err != nil {
 		return nil, err
@@ -108,15 +133,20 @@ func (r *run) watch(ctx context.Context, a agentsdk.Agent, strategy agentsdk.Cog
 func results(events []agentsdk.Event, action string) []agentsdk.ActionExecutionResult {
 	var found []agentsdk.ActionExecutionResult
 	for _, e := range events {
+		if e.Type != agentsdk.EventTypeActionResult {
+			continue
+		}
 		var result agentsdk.ActionExecutionResult
-		if e.Type == agentsdk.EventTypeActionResult && json.Unmarshal(e.Payload, &result) == nil && result.ActionID == action {
+		err := json.Unmarshal(e.Payload, &result)
+		if err == nil && result.ActionID == action {
 			found = append(found, result)
 		}
 	}
 	return found
 }
 
-// resultsAt tells, for each result of the action in the session, the index of the given event it followed.
+// resultsAt tells, for each result of the action in the session, the index of
+// the given event it followed.
 func resultsAt(session []agentsdk.Event, given []agentsdk.Event, action string) []int {
 	index := map[agentsdk.EventID]int{}
 	for i, e := range given {

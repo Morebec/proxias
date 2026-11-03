@@ -7,8 +7,10 @@ import (
 	"github.com/morebec/proxias/agentsdk"
 )
 
-// catalogScenarios are the scenarios of the examples (chat, unattended) on an agent with the hundred actions of the
-// catalog. Each is strict: the calls made, rejected ones included, must be exactly the ones expected, with the right
+// catalogScenarios are the scenarios of the examples (chat, unattended) on an
+// agent with the hundred actions of the catalog. Each is strict: the calls
+// made, rejected ones included, must be exactly the ones expected, with the
+// right
 // parameters, in order.
 func catalogScenarios() []scenario {
 	return []scenario{
@@ -19,7 +21,11 @@ func catalogScenarios() []scenario {
 
 // withCatalog is the agent, with the catalog's actions recorded in c.
 func withCatalog(id string, persona agentsdk.AgentPersona, c *calls) agentsdk.Agent {
-	return agentsdk.Agent{ID: id, AgentPersona: persona, ActionExecutor: catalogActions(c)}
+	return agentsdk.Agent{
+		ID:             id,
+		AgentPersona:   persona,
+		ActionExecutor: catalogActions(c),
+	}
 }
 
 // expected is a call expected, and how to tell its parameters are right.
@@ -28,7 +34,8 @@ type expected struct {
 	right  func(params map[string]any) bool
 }
 
-// check tells whether the calls made are exactly the expected ones, and why not.
+// check tells whether the calls made are exactly the expected ones, and why
+// not.
 func check(made []call, want ...expected) (bool, string) {
 	describe := func() string {
 		s := make([]string, 0, len(made))

@@ -23,17 +23,37 @@ func TestSimpleActionExecutor(t *testing.T) {
 		{
 			name: "GIVEN actions THEN they are described by ID, and run in order",
 			given: map[string]agentsdk.SimpleAction{
-				"b": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "b"}, RunFn: func(_ context.Context, _ agentsdk.Session, params map[string]any) (agentsdk.ActionExecutionResult, error) {
-					return agentsdk.ActionExecutionResult{ActionID: "b", Status: "completed", Data: params}, nil
-				}},
-				"a": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"}, RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
-					return agentsdk.ActionExecutionResult{ActionID: "a", Status: "completed"}, nil
-				}},
+				"b": {
+					ActionDescriptor: agentsdk.ActionDescriptor{ID: "b"},
+					RunFn: func(_ context.Context, _ agentsdk.Session, params map[string]any) (agentsdk.ActionExecutionResult, error) {
+						return agentsdk.ActionExecutionResult{
+							ActionID: "b",
+							Status:   "completed",
+							Data:     params,
+						}, nil
+					},
+				},
+				"a": {
+					ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"},
+					RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
+						return agentsdk.ActionExecutionResult{
+							ActionID: "a",
+							Status:   "completed",
+						}, nil
+					},
+				},
 			},
-			when:        []agentsdk.ActionExecutionRequest{{ActionID: "b", Params: map[string]any{"x": "1"}}, {ActionID: "a"}},
+			when: []agentsdk.ActionExecutionRequest{
+				{ActionID: "b", Params: map[string]any{"x": "1"}},
+				{ActionID: "a"},
+			},
 			descriptors: []string{"a", "b"},
 			then: []agentsdk.ActionExecutionResult{
-				{ActionID: "b", Status: "completed", Data: map[string]any{"x": "1"}},
+				{
+					ActionID: "b",
+					Status:   "completed",
+					Data:     map[string]any{"x": "1"},
+				},
 				{ActionID: "a", Status: "completed"},
 			},
 		},
@@ -41,24 +61,47 @@ func TestSimpleActionExecutor(t *testing.T) {
 			name: "GIVEN an unknown action, and one without a function THEN they fail, their results say so, and the others run",
 			given: map[string]agentsdk.SimpleAction{
 				"a": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"}},
-				"b": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "b"}, RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
-					return agentsdk.ActionExecutionResult{ActionID: "b", Status: "completed"}, nil
-				}},
+				"b": {
+					ActionDescriptor: agentsdk.ActionDescriptor{ID: "b"},
+					RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
+						return agentsdk.ActionExecutionResult{
+							ActionID: "b",
+							Status:   "completed",
+						}, nil
+					},
+				},
 			},
-			when:        []agentsdk.ActionExecutionRequest{{ActionID: "z"}, {ActionID: "a"}, {ActionID: "b"}},
+			when: []agentsdk.ActionExecutionRequest{
+				{ActionID: "z"},
+				{ActionID: "a"},
+				{ActionID: "b"},
+			},
 			descriptors: []string{"a", "b"},
 			then: []agentsdk.ActionExecutionResult{
-				{ActionID: "z", Status: "failed", Data: map[string]any{"error": "unknown action"}},
-				{ActionID: "a", Status: "failed", Data: map[string]any{"error": "unknown action"}},
+				{
+					ActionID: "z",
+					Status:   "failed",
+					Data:     map[string]any{"error": "unknown action"},
+				},
+				{
+					ActionID: "a",
+					Status:   "failed",
+					Data:     map[string]any{"error": "unknown action"},
+				},
 				{ActionID: "b", Status: "completed"},
 			},
 		},
 		{
 			name: "GIVEN an action that fails THEN it is an error",
 			given: map[string]agentsdk.SimpleAction{
-				"a": {ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"}, RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
-					return agentsdk.ActionExecutionResult{}, errors.New("down")
-				}},
+				"a": {
+					ActionDescriptor: agentsdk.ActionDescriptor{ID: "a"},
+					RunFn: func(context.Context, agentsdk.Session, map[string]any) (agentsdk.ActionExecutionResult, error) {
+						return agentsdk.ActionExecutionResult{}, errors.New(
+							"down",
+						)
+					},
+				},
 			},
 			when:        []agentsdk.ActionExecutionRequest{{ActionID: "a"}},
 			descriptors: []string{"a"},
@@ -69,7 +112,10 @@ func TestSimpleActionExecutor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := agentsdk.SimpleActionExecutor{Actions: tt.given}
 
-			descs, err := executor.Descriptors(context.Background(), agentsdk.Session{})
+			descs, err := executor.Descriptors(
+				context.Background(),
+				agentsdk.Session{},
+			)
 			require.NoError(t, err)
 			ids := make([]string, 0, len(descs))
 			for _, d := range descs {
@@ -77,7 +123,11 @@ func TestSimpleActionExecutor(t *testing.T) {
 			}
 			assert.Equal(t, tt.descriptors, ids)
 
-			results, err := executor.Execute(context.Background(), agentsdk.Session{}, tt.when)
+			results, err := executor.Execute(
+				context.Background(),
+				agentsdk.Session{},
+				tt.when,
+			)
 			if tt.wantErr {
 				require.Error(t, err)
 				return

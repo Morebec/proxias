@@ -38,9 +38,14 @@ func TestHandlerModels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := openaihttp.NewHandler(agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(func(agentsdk.StreamUpdate) bool) {}
-			}), tt.agents)
+			handler := openaihttp.NewHandler(
+				agentsdk.StrategyFunc(
+					func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+						return func(func(agentsdk.StreamUpdate) bool) {}
+					},
+				),
+				tt.agents,
+			)
 
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/models", nil))
@@ -65,7 +70,16 @@ func TestHandlerChatCompletions(t *testing.T) {
 		{
 			name: "WHEN messages THEN they are the session, and the reply a chat.completion",
 			turn: []agentsdk.StreamUpdate{
-				{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Hi John."))}, StopReason: agentsdk.StopReasonEndTurn},
+				{
+					Events: []agentsdk.Event{
+						agentsdk.NewEvent(
+							agentsdk.EventTypeMessage,
+							agentsdk.NewAgentSource("ada"),
+							[]byte("Hi John."),
+						),
+					},
+					StopReason: agentsdk.StopReasonEndTurn,
+				},
 			},
 			when: `{"model":"ada","messages":[
 				{"role":"system","content":"Be brief."},
@@ -75,21 +89,68 @@ func TestHandlerChatCompletions(t *testing.T) {
 				{"role":"tool","content":"ignored","tool_call_id":"call_1"}]}`,
 			code: http.StatusOK,
 			then: `{"object":"chat.completion","model":"ada","choices":[{"index":0,"message":{"role":"assistant","content":"Hi John."},"finish_reason":"stop"}]}`,
-			told: []string{"system:instructions Be brief.", "user:user hello", "agent:ada Hello!", "user:user I am John."},
+			told: []string{
+				"system:instructions Be brief.",
+				"user:user hello",
+				"agent:ada Hello!",
+				"user:user I am John.",
+			},
 		},
 		{
 			name: "WHEN stream THEN the reply's chunks are SSE chunks, ending with [DONE], a thought's text left out",
 			turn: []agentsdk.StreamUpdate{
-				{Chunk: &agentsdk.StreamChunk{EventID: "t", Data: []byte("Thinking.")}},
-				{Events: []agentsdk.Event{{ID: "t", Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Thinking."), Date: time.Now()}}},
-				{Chunk: &agentsdk.StreamChunk{EventID: "r", Data: []byte("Hi ")}},
-				{Chunk: &agentsdk.StreamChunk{EventID: "r", Data: []byte("John.")}},
-				{Events: []agentsdk.Event{{ID: "r", Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Hi John."), Date: time.Now()}}, StopReason: agentsdk.StopReasonEndTurn},
+				{
+					Chunk: &agentsdk.StreamChunk{
+						EventID: "t",
+						Data:    []byte("Thinking."),
+					},
+				},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "t",
+							Type:    agentsdk.EventTypeThought,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Thinking."),
+							Date:    time.Now(),
+						},
+					},
+				},
+				{
+					Chunk: &agentsdk.StreamChunk{
+						EventID: "r",
+						Data:    []byte("Hi "),
+					},
+				},
+				{
+					Chunk: &agentsdk.StreamChunk{
+						EventID: "r",
+						Data:    []byte("John."),
+					},
+				},
+				{
+					Events: []agentsdk.Event{
+						{
+							ID:      "r",
+							Type:    agentsdk.EventTypeMessage,
+							Source:  agentsdk.NewAgentSource("ada"),
+							Payload: []byte("Hi John."),
+							Date:    time.Now(),
+						},
+					},
+					StopReason: agentsdk.StopReasonEndTurn,
+				},
 			},
-			when:   `{"model":"ada","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
-			code:   http.StatusOK,
-			stream: []string{`{"content":"","role":"assistant"}`, `{"content":"Hi "}`, `{"content":"John."}`, `{}`, "[DONE]"},
-			told:   []string{"user:user hello"},
+			when: `{"model":"ada","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
+			code: http.StatusOK,
+			stream: []string{
+				`{"content":"","role":"assistant"}`,
+				`{"content":"Hi "}`,
+				`{"content":"John."}`,
+				`{}`,
+				"[DONE]",
+			},
+			told: []string{"user:user hello"},
 		},
 		{
 			name: "WHEN the model is not an agent THEN it is not found",
@@ -121,25 +182,38 @@ func TestHandlerChatCompletions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var told []string
-			strategy := agentsdk.StrategyFunc(func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				for _, e := range inv.Session.Events() {
-					told = append(told, e.Source.String()+" "+e.Text())
-				}
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					for _, d := range tt.turn {
-						if !yield(d) {
-							return
+			strategy := agentsdk.StrategyFunc(
+				func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					for _, e := range inv.Session.Events() {
+						told = append(told, e.Source.String()+" "+e.Text())
+					}
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						for _, d := range tt.turn {
+							if !yield(d) {
+								return
+							}
+						}
+						if tt.err != nil {
+							yield(agentsdk.StreamUpdate{Err: tt.err})
 						}
 					}
-					if tt.err != nil {
-						yield(agentsdk.StreamUpdate{Err: tt.err})
-					}
-				}
-			})
-			handler := openaihttp.NewHandler(strategy, []agentsdk.Agent{{ID: "ada"}})
+				},
+			)
+			handler := openaihttp.NewHandler(
+				strategy,
+				[]agentsdk.Agent{{ID: "ada"}},
+			)
 
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(tt.when)))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/v1/chat/completions",
+					strings.NewReader(tt.when),
+				),
+			)
 
 			assert.Equal(t, tt.code, w.Code)
 			assert.Equal(t, tt.told, told)

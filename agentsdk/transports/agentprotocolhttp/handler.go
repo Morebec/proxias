@@ -1,5 +1,6 @@
-// Package agentprotocolhttp serves an agent through the Agent Protocol (agentprotocol.ai, v1): a task is a session,
-// a step is one turn of the agent on it.
+// Package agentprotocolhttp serves an agent through the Agent Protocol
+// (agentprotocol.ai, v1): a task is a session, a step is one turn of the agent
+// on it.
 //
 //	POST /ap/v1/agent/tasks                                   creates a task: its input is the session's first message
 //	GET  /ap/v1/agent/tasks                                   the tasks
@@ -11,9 +12,10 @@
 //	GET  /ap/v1/agent/tasks/{task_id}/steps/{step_id}         a step
 //	GET  /ap/v1/agent/tasks/{task_id}/artifacts               none: the agent makes no artifacts
 //
-// A step's output is the text of the turn (a reply or a thought); it is the last step when its strategy says the agent
-// is done (end_turn), otherwise the next step reasons on what it added. Tasks are kept in memory, a task's steps one at a time. Lists are not paginated: all
-// the items are on page 1.
+// A step's output is the text of the turn (a reply or a thought); it is the
+// last step when its strategy says the agent is done (end_turn), otherwise the
+// next step reasons on what it added. Tasks are kept in memory, a task's steps
+// one at a time. Lists are not paginated: all the items are on page 1.
 package agentprotocolhttp
 
 import (
@@ -75,7 +77,8 @@ type handler struct {
 	tasks []*task
 }
 
-// NewHandler returns the handler of the agent, whose steps are turns with the strategy.
+// NewHandler returns the handler of the agent, whose steps are turns with the
+// strategy.
 func NewHandler(agent agentsdk.Agent, strategy agentsdk.CognitiveStrategy) http.Handler {
 	h := &handler{agent: agent, strategy: strategy}
 	mux := http.NewServeMux()
@@ -84,8 +87,14 @@ func NewHandler(agent agentsdk.Agent, strategy agentsdk.CognitiveStrategy) http.
 	mux.HandleFunc("GET /ap/v1/agent/tasks/{task_id}", h.getTask)
 	mux.HandleFunc("POST /ap/v1/agent/tasks/{task_id}/steps", h.executeStep)
 	mux.HandleFunc("GET /ap/v1/agent/tasks/{task_id}/steps", h.listSteps)
-	mux.HandleFunc("GET /ap/v1/agent/tasks/{task_id}/steps/{step_id}", h.getStep)
-	mux.HandleFunc("GET /ap/v1/agent/tasks/{task_id}/artifacts", h.listArtifacts)
+	mux.HandleFunc(
+		"GET /ap/v1/agent/tasks/{task_id}/steps/{step_id}",
+		h.getStep,
+	)
+	mux.HandleFunc(
+		"GET /ap/v1/agent/tasks/{task_id}/artifacts",
+		h.listArtifacts,
+	)
 	return mux
 }
 
@@ -94,7 +103,14 @@ func (h *handler) createTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	t := &task{Task: Task{TaskID: uuid.NewString(), Input: req.Input, AdditionalInput: req.AdditionalInput, Artifacts: []any{}}}
+	t := &task{
+		Task: Task{
+			TaskID:          uuid.NewString(),
+			Input:           req.Input,
+			AdditionalInput: req.AdditionalInput,
+			Artifacts:       []any{},
+		},
+	}
 	t.session = agentsdk.NewSessionWithID(t.TaskID)
 	if req.Input != "" {
 		t.session = t.session.WithEvents(agentsdk.NewMessageEvent(agentsdk.NewUserSource("user"), req.Input))
@@ -112,7 +128,11 @@ func (h *handler) listTasks(w http.ResponseWriter, _ *http.Request) {
 		tasks = append(tasks, t.Task)
 	}
 	h.mutex.Unlock()
-	h.write(w, http.StatusOK, map[string]any{"tasks": tasks, "pagination": h.page(len(tasks))})
+	h.write(
+		w,
+		http.StatusOK,
+		map[string]any{"tasks": tasks, "pagination": h.page(len(tasks))},
+	)
 }
 
 func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
@@ -149,16 +169,32 @@ func (h *handler) executeStep(w http.ResponseWriter, r *http.Request) {
 	}
 	added := ended.Events()[len(s.Events()):]
 	s = ended
-	// A step is the last when its strategy says the agent is done (end_turn).
-	step := Step{TaskID: t.TaskID, StepID: uuid.NewString(), Name: fmt.Sprintf("turn %d", len(t.steps)+1), Status: "completed",
-		Input: req.Input, AdditionalInput: req.AdditionalInput, Artifacts: []any{}, IsLast: stream.StopReason() == agentsdk.StopReasonEndTurn}
+	// A step is the last when its strategy says the agent stopped (end_turn,
+	// length, content_filter), not when its loop
+	// took all its turns.
+	stop := stream.StopReason()
+	step := Step{
+		TaskID:          t.TaskID,
+		StepID:          uuid.NewString(),
+		Name:            fmt.Sprintf("turn %d", len(t.steps)+1),
+		Status:          "completed",
+		Input:           req.Input,
+		AdditionalInput: req.AdditionalInput,
+		Artifacts:       []any{},
+		IsLast:          stop != "" && stop != agentsdk.StopReasonMaxTurns,
+	}
 	actions := 0
 	for _, e := range added {
-		if (e.Type == agentsdk.EventTypeMessage || e.Type == agentsdk.EventTypeThought) && e.Source.Type == agentsdk.EventSourceTypeAgent && e.Text() != "" {
-			step.Output = e.Text()
-		}
 		if e.Type == agentsdk.EventTypeActionResult {
 			actions++
+		}
+
+		// The output is the last text an agent said: a message, or a thought.
+		if !e.HasSourceType(agentsdk.EventSourceTypeAgent) || e.Text() == "" {
+			continue
+		}
+		if e.Type == agentsdk.EventTypeMessage || e.Type == agentsdk.EventTypeThought {
+			step.Output = e.Text()
 		}
 	}
 	if actions > 0 {
@@ -177,7 +213,11 @@ func (h *handler) listSteps(w http.ResponseWriter, r *http.Request) {
 	t.Lock()
 	steps := append([]Step{}, t.steps...)
 	t.Unlock()
-	h.write(w, http.StatusOK, map[string]any{"steps": steps, "pagination": h.page(len(steps))})
+	h.write(
+		w,
+		http.StatusOK,
+		map[string]any{"steps": steps, "pagination": h.page(len(steps))},
+	)
 }
 
 func (h *handler) getStep(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +238,11 @@ func (h *handler) getStep(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.task(w, r); ok {
-		h.write(w, http.StatusOK, map[string]any{"artifacts": []any{}, "pagination": h.page(0)})
+		h.write(
+			w,
+			http.StatusOK,
+			map[string]any{"artifacts": []any{}, "pagination": h.page(0)},
+		)
 	}
 }
 
@@ -215,13 +259,15 @@ func (h *handler) task(w http.ResponseWriter, r *http.Request) (*task, bool) {
 	return nil, false
 }
 
-// read reads the body of the request, if any; one that is not a TaskRequest is answered 400.
+// read reads the body of the request, if any; one that is not a TaskRequest is
+// answered 400.
 func (h *handler) read(w http.ResponseWriter, r *http.Request) (TaskRequest, bool) {
 	var req TaskRequest
 	if r.ContentLength == 0 {
 		return req, true
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxRequestBytes)).Decode(&req); err != nil {
+	body := http.MaxBytesReader(w, r.Body, MaxRequestBytes)
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
 		h.fail(w, http.StatusBadRequest, "the body is not a task request")
 		return req, false
 	}
@@ -230,7 +276,12 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) (TaskRequest, boo
 
 // page is the pagination of a list of the items, all on one page.
 func (h *handler) page(items int) map[string]int {
-	return map[string]int{"total_items": items, "total_pages": 1, "current_page": 1, "page_size": max(items, 1)}
+	return map[string]int{
+		"total_items":  items,
+		"total_pages":  1,
+		"current_page": 1,
+		"page_size":    max(items, 1),
+	}
 }
 
 func (h *handler) fail(w http.ResponseWriter, status int, message string) {

@@ -45,7 +45,9 @@ Follow them.
 		{
 			name: "GIVEN two sections THEN a blank line separates them",
 			given: func() *proxias.Prompt {
-				return proxias.NewPrompt().AddSection("A", "a").AddSection("B", "b")
+				return proxias.NewPrompt().
+					AddSection("A", "a").
+					AddSection("B", "b")
 			},
 			then: `## A
 a
@@ -56,7 +58,10 @@ b`,
 		{
 			name: "GIVEN bullet points after a paragraph THEN a blank line separates them",
 			given: func() *proxias.Prompt {
-				return proxias.NewPrompt().AddParagraph("Rules:").AddBulletPoint("one").AddBulletPoint("two")
+				return proxias.NewPrompt().
+					AddParagraph("Rules:").
+					AddBulletPoint("one").
+					AddBulletPoint("two")
 			},
 			then: `Rules:
 
@@ -66,7 +71,9 @@ b`,
 		{
 			name: "GIVEN a paragraph after bullet points THEN a blank line separates them",
 			given: func() *proxias.Prompt {
-				return proxias.NewPrompt().AddBulletPoint("one").AddParagraph("Done.")
+				return proxias.NewPrompt().
+					AddBulletPoint("one").
+					AddParagraph("Done.")
 			},
 			then: `- one
 
@@ -91,7 +98,11 @@ two`)
 		{
 			name: "GIVEN blank blocks THEN they are ignored",
 			given: func() *proxias.Prompt {
-				return proxias.NewPrompt().AddParagraph(" ").AddSection(" ", "x").AddBulletPoint("").AddLabeledBulletPoint("", "x")
+				return proxias.NewPrompt().
+					AddParagraph(" ").
+					AddSection(" ", "x").
+					AddBulletPoint("").
+					AddLabeledBulletPoint("", "x")
 			},
 			then: "",
 		},

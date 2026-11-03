@@ -19,20 +19,24 @@ type Usage struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
-	// CallDuration is the time the calls took, from their request to their response read whole.
+	// CallDuration is the time the calls took, from their request to their
+	// response read whole.
 	CallDuration time.Duration
 }
 
-// UsageCounter counts the usage of the calls of the clients built with its Middleware: of every component that uses
-// them (a ReAct shell's Model as much as a classifier or a synthesizer of Proxias). It reads the usage of the
-// responses that are JSON; a streamed response is counted as a call, without its tokens. It is safe for
+// UsageCounter counts the usage of the calls of the clients built with its
+// Middleware: of every component that uses them (a ReAct shell's Model as much
+// as a classifier or a synthesizer of Proxias). It reads the usage of the
+// responses that are JSON; a streamed response is counted as a call, without
+// its tokens. It is safe for
 // concurrent use.
 type UsageCounter struct {
 	mutex sync.Mutex
 	usage Usage
 }
 
-// Middleware is the client option that counts its calls: option.WithMiddleware(counter.Middleware()).
+// Middleware is the client option that counts its calls:
+// option.WithMiddleware(counter.Middleware()).
 func (c *UsageCounter) Middleware() option.Middleware {
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		began := time.Now()

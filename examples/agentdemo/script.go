@@ -7,7 +7,8 @@ import (
 	"github.com/morebec/proxias/agentsdk"
 )
 
-// The markers of a scripted answer: <thought>...</thought>, <action>{"action_id": ..., "params": ...}</action>, and a
+// The markers of a scripted answer: <thought>...</thought>,
+// <action>{"action_id": ..., "params": ...}</action>, and a
 // final answer ended by Done.
 const (
 	Done = "<done/>"
@@ -20,16 +21,30 @@ const (
 
 // markers matches the markers of a scripted answer, in order of appearance.
 var markers = regexp.MustCompile(
-	`(?s)` + regexp.QuoteMeta(thoughtOpen) + `(.*?)` + regexp.QuoteMeta(thoughtClose) +
-		`|` + regexp.QuoteMeta(actionOpen) + `(.*?)` + regexp.QuoteMeta(actionClose) +
-		`|` + regexp.QuoteMeta(Done),
+	`(?s)` + regexp.QuoteMeta(
+		thoughtOpen,
+	) + `(.*?)` + regexp.QuoteMeta(
+		thoughtClose,
+	) +
+		`|` + regexp.QuoteMeta(
+		actionOpen,
+	) + `(.*?)` + regexp.QuoteMeta(
+		actionClose,
+	) +
+		`|` + regexp.QuoteMeta(
+		Done,
+	),
 )
 
-// parseAnswer reads the events of a scripted answer, in order: a thought, an action request, and the text before Done as
+// parseAnswer reads the events of a scripted answer, in order: a thought, an
+// action request, and the text before Done as
 // the reply.
 func parseAnswer(answer string) []agentsdk.Event {
 	event := func(t agentsdk.EventType, payload string) agentsdk.Event {
-		return agentsdk.Event{Type: t, Payload: []byte(strings.TrimSpace(payload))}
+		return agentsdk.Event{
+			Type:    t,
+			Payload: []byte(strings.TrimSpace(payload)),
+		}
 	}
 	var events []agentsdk.Event
 	last := 0

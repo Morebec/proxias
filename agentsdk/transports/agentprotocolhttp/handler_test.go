@@ -29,28 +29,68 @@ func TestHandlerSteps(t *testing.T) {
 		{
 			name: "GIVEN a turn that replies THEN the step is the last, its output the reply",
 			turns: [][]agentsdk.Event{
-				{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Hi."))},
+				{
+					agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Hi.")),
+				},
 			},
 			task:  `{"input":"hello"}`,
 			steps: []string{``},
-			then:  []agentprotocolhttp.Step{{Name: "turn 1", Status: "completed", Output: "Hi.", IsLast: true, Artifacts: []any{}}},
-			told:  []string{"user:user hello"},
+			then: []agentprotocolhttp.Step{
+				{
+					Name:      "turn 1",
+					Status:    "completed",
+					Output:    "Hi.",
+					IsLast:    true,
+					Artifacts: []any{},
+				},
+			},
+			told: []string{"user:user hello"},
 		},
 		{
 			name: "GIVEN a turn that ends on the results of its actions THEN the step is not the last, and the next step takes the next turn",
 			turns: [][]agentsdk.Event{
 				{
 					agentsdk.NewEvent(agentsdk.EventTypeThought, agentsdk.NewAgentSource("ada"), []byte("Echoing.")),
-					{ID: "q", Type: agentsdk.EventTypeActionRequest, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`{"action_id":"echo"}`), Date: time.Now()},
-					{ID: "r", CausationID: "q", Type: agentsdk.EventTypeActionResult, Source: agentsdk.NewSystemSource("actions"), Payload: []byte(`{"action_id":"echo","status":"completed"}`), Date: time.Now()},
+					{
+						ID:      "q",
+						Type:    agentsdk.EventTypeActionRequest,
+						Source:  agentsdk.NewAgentSource("ada"),
+						Payload: []byte(`{"action_id":"echo"}`),
+						Date:    time.Now(),
+					},
+					{
+						ID:          "r",
+						CausationID: "q",
+						Type:        agentsdk.EventTypeActionResult,
+						Source:      agentsdk.NewSystemSource("actions"),
+						Payload: []byte(
+							`{"action_id":"echo","status":"completed"}`,
+						),
+						Date: time.Now(),
+					},
 				},
-				{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Echoed."))},
+				{
+					agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Echoed.")),
+				},
 			},
 			task:  `{"input":"echo"}`,
 			steps: []string{``, `{"input":"thanks"}`},
 			then: []agentprotocolhttp.Step{
-				{Name: "turn 1", Status: "completed", Output: "Echoing.", AdditionalOutput: map[string]any{"actions": float64(1)}, Artifacts: []any{}},
-				{Name: "turn 2", Status: "completed", Input: "thanks", Output: "Echoed.", IsLast: true, Artifacts: []any{}},
+				{
+					Name:             "turn 1",
+					Status:           "completed",
+					Output:           "Echoing.",
+					AdditionalOutput: map[string]any{"actions": float64(1)},
+					Artifacts:        []any{},
+				},
+				{
+					Name:      "turn 2",
+					Status:    "completed",
+					Input:     "thanks",
+					Output:    "Echoed.",
+					IsLast:    true,
+					Artifacts: []any{},
+				},
 			},
 			told: []string{
 				"user:user echo",
@@ -64,30 +104,56 @@ func TestHandlerSteps(t *testing.T) {
 				told []string
 				turn int
 			)
-			strategy := agentsdk.StrategyFunc(func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				for _, e := range inv.Session.Events() {
-					told = append(told, e.Source.String()+" "+e.Text())
-				}
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					turn++
-					var stop agentsdk.StopReason
-					if events := tt.turns[turn-1]; events[len(events)-1].Type == agentsdk.EventTypeMessage {
-						stop = agentsdk.StopReasonEndTurn
+			strategy := agentsdk.StrategyFunc(
+				func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					for _, e := range inv.Session.Events() {
+						told = append(told, e.Source.String()+" "+e.Text())
 					}
-					yield(agentsdk.StreamUpdate{Events: tt.turns[turn-1], StopReason: stop})
-				}
-			})
-			handler := agentprotocolhttp.NewHandler(agentsdk.Agent{ID: "ada"}, strategy)
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						turn++
+						var stop agentsdk.StopReason
+						if events := tt.turns[turn-1]; events[len(events)-1].Type == agentsdk.EventTypeMessage {
+							stop = agentsdk.StopReasonEndTurn
+						}
+						yield(
+							agentsdk.StreamUpdate{
+								Events:     tt.turns[turn-1],
+								StopReason: stop,
+							},
+						)
+					}
+				},
+			)
+			handler := agentprotocolhttp.NewHandler(
+				agentsdk.Agent{ID: "ada"},
+				strategy,
+			)
 
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ap/v1/agent/tasks", strings.NewReader(tt.task)))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/ap/v1/agent/tasks",
+					strings.NewReader(tt.task),
+				),
+			)
 			require.Equal(t, http.StatusOK, w.Code)
 			var task agentprotocolhttp.Task
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &task))
 			var steps []agentprotocolhttp.Step
 			for _, body := range tt.steps {
 				w := httptest.NewRecorder()
-				handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ap/v1/agent/tasks/"+task.TaskID+"/steps", strings.NewReader(body)))
+				handler.ServeHTTP(
+					w,
+					httptest.NewRequestWithContext(
+						t.Context(),
+						http.MethodPost,
+						"/ap/v1/agent/tasks/"+task.TaskID+"/steps",
+						strings.NewReader(body),
+					),
+				)
 				require.Equal(t, http.StatusOK, w.Code)
 				var step agentprotocolhttp.Step
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &step))
@@ -155,23 +221,58 @@ func TestHandlerReads(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			strategy := agentsdk.StrategyFunc(func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
-					yield(agentsdk.StreamUpdate{Events: []agentsdk.Event{agentsdk.NewEvent(agentsdk.EventTypeMessage, agentsdk.NewAgentSource("ada"), []byte("Hi."))}, StopReason: agentsdk.StopReasonEndTurn})
-				}
-			})
-			handler := agentprotocolhttp.NewHandler(agentsdk.Agent{ID: "ada"}, strategy)
+			strategy := agentsdk.StrategyFunc(
+				func(context.Context, agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+					return func(yield func(agentsdk.StreamUpdate) bool) {
+						yield(
+							agentsdk.StreamUpdate{
+								Events: []agentsdk.Event{
+									agentsdk.NewEvent(
+										agentsdk.EventTypeMessage,
+										agentsdk.NewAgentSource("ada"),
+										[]byte("Hi."),
+									),
+								},
+								StopReason: agentsdk.StopReasonEndTurn,
+							},
+						)
+					}
+				},
+			)
+			handler := agentprotocolhttp.NewHandler(
+				agentsdk.Agent{ID: "ada"},
+				strategy,
+			)
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ap/v1/agent/tasks", strings.NewReader(`{"input":"hello"}`)))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/ap/v1/agent/tasks",
+					strings.NewReader(`{"input":"hello"}`),
+				),
+			)
 			var task agentprotocolhttp.Task
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &task))
 			w = httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ap/v1/agent/tasks/"+task.TaskID+"/steps", nil))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(
+					t.Context(),
+					http.MethodPost,
+					"/ap/v1/agent/tasks/"+task.TaskID+"/steps",
+					nil,
+				),
+			)
 			var step agentprotocolhttp.Step
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &step))
 
 			w = httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.when(task.TaskID, step.StepID), nil))
+			handler.ServeHTTP(
+				w,
+				httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.when(task.TaskID, step.StepID), nil),
+			)
 
 			assert.Equal(t, tt.code, w.Code)
 			body := strings.ReplaceAll(strings.ReplaceAll(w.Body.String(), task.TaskID, "TASK"), step.StepID, "STEP")

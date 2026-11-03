@@ -1,5 +1,6 @@
-// Package agenthttp serves an agent over HTTP: one transport among any (a WebSocket, gRPC, a queue would be others),
-// which turns its requests into events for the agent and the agent's stream into its responses.
+// Package agenthttp serves an agent over HTTP: one transport among any (a
+// WebSocket, gRPC, a queue would be others), which turns its requests into
+// events for the agent and the agent's stream into its responses.
 //
 //	POST /sessions/{id}/messages  {"from": "john", "text": "..."}  the updates of the Loop, as NDJSON, as they come
 //	GET  /sessions/{id}                                            the session, as JSON
@@ -26,7 +27,8 @@ type Message struct {
 	Text string `json:"text"`
 }
 
-// Update is a line of the stream: whole events, or a chunk of one; the last line carries the error, if any.
+// Update is a line of the stream: whole events, or a chunk of one; the last
+// line carries the error, if any.
 type Update struct {
 	Events []agentsdk.Event      `json:"events,omitempty"`
 	Chunk  *agentsdk.StreamChunk `json:"chunk,omitempty"`
@@ -48,9 +50,14 @@ type session struct {
 	agentsdk.Session
 }
 
-// NewHandler returns the handler of the agent, which Loops with the strategy on each message.
+// NewHandler returns the handler of the agent, which Loops with the strategy on
+// each message.
 func NewHandler(agent agentsdk.Agent, strategy agentsdk.CognitiveStrategy) http.Handler {
-	h := &handler{agent: agent, strategy: strategy, sessions: map[string]*session{}}
+	h := &handler{
+		agent:    agent,
+		strategy: strategy,
+		sessions: map[string]*session{},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /sessions/{id}/messages", h.postMessage)
 	mux.HandleFunc("GET /sessions/{id}", h.getSession)
@@ -71,7 +78,8 @@ func (h *handler) session(id string) *session {
 
 func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	var message Message
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxMessageBytes)).Decode(&message); err != nil {
+	body := http.MaxBytesReader(w, r.Body, MaxMessageBytes)
+	if err := json.NewDecoder(body).Decode(&message); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			http.Error(w, "the message is too large", http.StatusRequestEntityTooLarge)
@@ -81,7 +89,11 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if message.From == "" || message.Text == "" {
-		http.Error(w, `a message needs "from" and "text"`, http.StatusBadRequest)
+		http.Error(
+			w,
+			`a message needs "from" and "text"`,
+			http.StatusBadRequest,
+		)
 		return
 	}
 
@@ -94,7 +106,9 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	flusher, _ := w.(http.Flusher)
 	event := agentsdk.NewMessageEvent(agentsdk.NewUserSource(message.From), message.Text)
 	s.Session = s.WithEvents(event)
-	_ = encoder.Encode(Update{Events: []agentsdk.Event{s.LastEvent()}}) // a client gone is told by the context, which ends the loop
+	_ = encoder.Encode(
+		Update{Events: []agentsdk.Event{s.LastEvent()}},
+	) // a client gone is told by the context, which ends the loop
 	stream, err := h.agent.Loop(r.Context(), s.Session, h.strategy)
 	if err != nil {
 		_ = encoder.Encode(Update{Error: err.Error()})

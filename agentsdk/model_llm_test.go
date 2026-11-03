@@ -13,66 +13,166 @@ func TestNewLLMMessage(t *testing.T) {
 		name  string
 		given agentsdk.Event
 		then  agentsdk.LLMMessage
-		ok    bool
 	}{
 		{
-			name:  "GIVEN the agent's action request THEN it is the assistant's tool call",
-			given: agentsdk.Event{ID: "toolu_1", Type: agentsdk.EventTypeActionRequest, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`{"action_id":"send_email","params":{"to":"joe"}}`)},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{ToolCall: &agentsdk.LLMToolCall{ID: "toolu_1", Name: "send_email", Input: map[string]any{"to": "joe"}}}}},
-			ok:    true,
+			name: "GIVEN the agent's thinking, unsigned (an OpenAI-compatible model's) THEN it is given back as it came",
+			given: agentsdk.Event{
+				Type:    agentsdk.EventTypeThought,
+				Source:  agentsdk.NewAgentSource("ada"),
+				Payload: []byte(`{"Thinking":"The user greets me."}`),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Thinking: "The user greets me."},
+				},
+			},
 		},
 		{
-			name:  "GIVEN the agent's action request that is not one THEN it is the assistant's text, tagged",
-			given: agentsdk.Event{Type: agentsdk.EventTypeActionRequest, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`send`)},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{Text: "[action.request from agent:ada] send"}}},
-			ok:    true,
+			name: "GIVEN the agent's action request THEN it is the assistant's tool call",
+			given: agentsdk.Event{
+				ID:     "toolu_1",
+				Type:   agentsdk.EventTypeActionRequest,
+				Source: agentsdk.NewAgentSource("ada"),
+				Payload: []byte(
+					`{"action_id":"send_email","params":{"to":"joe"}}`,
+				),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{
+						ToolCall: &agentsdk.LLMToolCall{
+							ID:    "toolu_1",
+							Name:  "send_email",
+							Input: map[string]any{"to": "joe"},
+						},
+					},
+				},
+			},
 		},
 		{
-			name:  "GIVEN the agent's signed thinking THEN it is given back as it came",
-			given: agentsdk.Event{Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`{"Thinking":"An email to joe.","Signature":"sig1"}`)},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{Thinking: "An email to joe.", Signature: "sig1"}}},
-			ok:    true,
+			name: "GIVEN the agent's action request that is not one THEN it is the assistant's text, tagged",
+			given: agentsdk.Event{
+				Type:    agentsdk.EventTypeActionRequest,
+				Source:  agentsdk.NewAgentSource("ada"),
+				Payload: []byte(`send`),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Text: "[action.request from agent:ada] send"},
+				},
+			},
 		},
 		{
-			name:  "GIVEN the agent's thought in words THEN it is the assistant's text",
-			given: agentsdk.Event{Type: agentsdk.EventTypeThought, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("An email.")},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{Text: "An email."}}},
-			ok:    true,
+			name: "GIVEN the agent's signed thinking THEN it is given back as it came",
+			given: agentsdk.Event{
+				Type:   agentsdk.EventTypeThought,
+				Source: agentsdk.NewAgentSource("ada"),
+				Payload: []byte(
+					`{"Thinking":"An email to joe.","Signature":"sig1"}`,
+				),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Thinking: "An email to joe.", Signature: "sig1"},
+				},
+			},
 		},
 		{
-			name:  "GIVEN the agent's empty message THEN the model is not told it",
-			given: agentsdk.Event{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada")},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{}}},
+			name: "GIVEN the agent's thought in words THEN it is the assistant's text",
+			given: agentsdk.Event{
+				Type:    agentsdk.EventTypeThought,
+				Source:  agentsdk.NewAgentSource("ada"),
+				Payload: []byte("An email."),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Text: "An email."},
+				},
+			},
 		},
 		{
-			name:  "GIVEN an action result THEN it is the user's tool result",
-			given: agentsdk.Event{Type: agentsdk.EventTypeActionResult, Source: agentsdk.NewSystemSource("actions"), CausationID: "toolu_1", Payload: []byte(`{"status":"completed"}`)},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{ToolResult: &agentsdk.LLMToolResult{CallID: "toolu_1", Content: `{"status":"completed"}`}}}},
-			ok:    true,
+			name: "GIVEN the agent's empty message THEN it is an empty message",
+			given: agentsdk.Event{
+				Type:   agentsdk.EventTypeMessage,
+				Source: agentsdk.NewAgentSource("ada"),
+			},
+			then: agentsdk.LLMMessage{
+				Role:  agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{{}},
+			},
 		},
 		{
-			name:  "GIVEN a person's message THEN it is the user's text",
-			given: agentsdk.Event{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "hi"}}},
-			ok:    true,
+			name: "GIVEN an action result THEN it is the tool's result",
+			given: agentsdk.Event{
+				Type:        agentsdk.EventTypeActionResult,
+				Source:      agentsdk.NewSystemSource("actions"),
+				CausationID: "toolu_1",
+				Payload:     []byte(`{"status":"completed"}`),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleTool,
+				Parts: []agentsdk.LLMPart{
+					{
+						ToolResult: &agentsdk.LLMToolResult{
+							CallID:  "toolu_1",
+							Content: `{"status":"completed"}`,
+						},
+					},
+				},
+			},
 		},
 		{
-			name:  "GIVEN another agent's message THEN it is the user's text, tagged",
-			given: agentsdk.Event{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("rita"), Payload: []byte("hi")},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "[message from agent:rita] hi"}}},
-			ok:    true,
+			name: "GIVEN a person's message THEN it is the user's text",
+			given: agentsdk.Event{
+				Type:    agentsdk.EventTypeMessage,
+				Source:  agentsdk.NewUserSource("john"),
+				Payload: []byte("hi"),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleUser,
+				Parts: []agentsdk.LLMPart{
+					{Text: "hi"},
+				},
+			},
 		},
 		{
-			name:  "GIVEN an empty event of another source THEN the model is not told it",
-			given: agentsdk.Event{Type: "probe.disk", Source: agentsdk.NewSystemSource("db-1")},
-			then:  agentsdk.LLMMessage{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "[probe.disk from system:db-1] "}}},
+			name: "GIVEN another agent's message THEN it is the user's text, tagged",
+			given: agentsdk.Event{
+				Type:    agentsdk.EventTypeMessage,
+				Source:  agentsdk.NewAgentSource("rita"),
+				Payload: []byte("hi"),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleUser,
+				Parts: []agentsdk.LLMPart{
+					{Text: "[message from agent:rita] hi"},
+				},
+			},
+		},
+		{
+			name: "GIVEN a system's observation THEN it is the user's, tagged with its type and source: not an instruction",
+			given: agentsdk.Event{
+				Type:    "probe.disk",
+				Source:  agentsdk.NewSystemSource("db-1"),
+				Payload: []byte("disk 93% full"),
+			},
+			then: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleUser,
+				Parts: []agentsdk.LLMPart{
+					{Text: "[probe.disk from system:db-1] disk 93% full"},
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, ok := agentsdk.NewLLMMessage(agentsdk.NewAgentSource("ada"), tt.given)
+			m := agentsdk.NewLLMMessageFromEvent(agentsdk.NewAgentSource("ada"), tt.given)
 
-			assert.Equal(t, tt.ok, ok)
 			assert.Equal(t, tt.then, m)
 		})
 	}
@@ -85,46 +185,149 @@ func TestNewLLMRequestFromSession(t *testing.T) {
 		then  agentsdk.LLMRequest
 	}{
 		{
-			name: "GIVEN leading messages of a system source THEN they are the system prompt, and a later one a message",
+			name: "GIVEN messages of a system source THEN they are system messages, where they are in the session",
 			given: []agentsdk.Event{
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewSystemSource("app"), Payload: []byte("Be brief.")},
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewSystemSource("app"), Payload: []byte("Be kind.")},
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")},
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewSystemSource("app"), Payload: []byte("Wrap up.")},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewSystemSource("app"),
+					Payload: []byte("Be brief."),
+				},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewSystemSource("app"),
+					Payload: []byte("Be kind."),
+				},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewUserSource("john"),
+					Payload: []byte("hi"),
+				},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewSystemSource("app"),
+					Payload: []byte("Wrap up."),
+				},
 			},
 			then: agentsdk.LLMRequest{
-				System: []string{"Be brief.", "Be kind."},
 				Messages: []agentsdk.LLMMessage{
-					{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "hi"}}},
-					{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "[message from system:app] Wrap up."}}},
+					{
+						Role: agentsdk.LLMMessageRoleSystem,
+						Parts: []agentsdk.LLMPart{
+							{Text: "Be brief."},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleSystem,
+						Parts: []agentsdk.LLMPart{
+							{Text: "Be kind."},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleUser,
+						Parts: []agentsdk.LLMPart{
+							{Text: "hi"},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleSystem,
+						Parts: []agentsdk.LLMPart{
+							{Text: "Wrap up."},
+						},
+					},
 				},
 			},
 		},
 		{
 			name: "GIVEN the agent's request, its result and its reply THEN they are a tool call, its result and the assistant's text, one message each",
 			given: []agentsdk.Event{
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("email joe")},
-				{ID: "toolu_1", Type: agentsdk.EventTypeActionRequest, Source: agentsdk.NewAgentSource("ada"), Payload: []byte(`{"action_id":"send_email"}`)},
-				{Type: agentsdk.EventTypeActionResult, Source: agentsdk.NewSystemSource("actions"), CausationID: "toolu_1", Payload: []byte(`{"status":"completed"}`)},
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada"), Payload: []byte("Sent.")},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewUserSource("john"),
+					Payload: []byte("email joe"),
+				},
+				{
+					ID:      "toolu_1",
+					Type:    agentsdk.EventTypeActionRequest,
+					Source:  agentsdk.NewAgentSource("ada"),
+					Payload: []byte(`{"action_id":"send_email"}`),
+				},
+				{
+					Type:        agentsdk.EventTypeActionResult,
+					Source:      agentsdk.NewSystemSource("actions"),
+					CausationID: "toolu_1",
+					Payload:     []byte(`{"status":"completed"}`),
+				},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewAgentSource("ada"),
+					Payload: []byte("Sent."),
+				},
 			},
 			then: agentsdk.LLMRequest{
 				Messages: []agentsdk.LLMMessage{
-					{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "email joe"}}},
-					{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{ToolCall: &agentsdk.LLMToolCall{ID: "toolu_1", Name: "send_email"}}}},
-					{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{ToolResult: &agentsdk.LLMToolResult{CallID: "toolu_1", Content: `{"status":"completed"}`}}}},
-					{Role: agentsdk.RoleAssistant, Parts: []agentsdk.LLMPart{{Text: "Sent."}}},
+					{
+						Role: agentsdk.LLMMessageRoleUser,
+						Parts: []agentsdk.LLMPart{
+							{Text: "email joe"},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleAssistant,
+						Parts: []agentsdk.LLMPart{
+							{
+								ToolCall: &agentsdk.LLMToolCall{
+									ID:   "toolu_1",
+									Name: "send_email",
+								},
+							},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleTool,
+						Parts: []agentsdk.LLMPart{
+							{
+								ToolResult: &agentsdk.LLMToolResult{
+									CallID:  "toolu_1",
+									Content: `{"status":"completed"}`,
+								},
+							},
+						},
+					},
+					{
+						Role: agentsdk.LLMMessageRoleAssistant,
+						Parts: []agentsdk.LLMPart{
+							{Text: "Sent."},
+						},
+					},
 				},
 			},
 		},
 		{
-			name: "GIVEN events the model is not told THEN they are left out",
+			name: "GIVEN an empty event THEN it is an empty message, which the adapters leave out",
 			given: []agentsdk.Event{
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewUserSource("john"), Payload: []byte("hi")},
-				{Type: agentsdk.EventTypeMessage, Source: agentsdk.NewAgentSource("ada")},
+				{
+					Type:    agentsdk.EventTypeMessage,
+					Source:  agentsdk.NewUserSource("john"),
+					Payload: []byte("hi"),
+				},
+				{
+					Type:   agentsdk.EventTypeMessage,
+					Source: agentsdk.NewAgentSource("ada"),
+				},
 			},
 			then: agentsdk.LLMRequest{
-				Messages: []agentsdk.LLMMessage{{Role: agentsdk.RoleUser, Parts: []agentsdk.LLMPart{{Text: "hi"}}}},
+				Messages: []agentsdk.LLMMessage{
+					{
+						Role: agentsdk.LLMMessageRoleUser,
+						Parts: []agentsdk.LLMPart{
+							{Text: "hi"},
+						},
+					},
+					{
+						Role:  agentsdk.LLMMessageRoleAssistant,
+						Parts: []agentsdk.LLMPart{{}},
+					},
+				},
 			},
 		},
 		{
@@ -134,7 +337,7 @@ func TestNewLLMRequestFromSession(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := agentsdk.NewLLMRequestFromSession(agentsdk.NewSession(tt.given...), agentsdk.NewAgentSource("ada"))
+			req := agentsdk.NewLLMRequestFromSession(agentsdk.NewAgentSource("ada"), agentsdk.NewSession(tt.given...))
 
 			assert.Equal(t, tt.then, req)
 		})
