@@ -23,6 +23,9 @@ Every strategy is told who the agent is and what it remembers through `NewAgentP
 |---|---|---|---|
 | [ReAct](strategies/react.md) | about N + 1, one a turn | after every step | open-ended tasks, conversations, tasks whose next step depends on the last result |
 | [ReWOO](strategies/rewoo.md) | 2, whatever N | never within a turn | tasks whose steps are known up front, chained through their results |
+| [Observe-Plan-Execute](strategies/observe-plan-execute.md) | about N + 2 | after every step, against a written plan | longer tasks that must adapt while keeping to a plan |
 
 ReAct is the default choice: it decides each step after seeing the last one's result. ReWOO trades that for fewer
 calls and fewer tokens: the model plans once, the agent runs the plan, and the model answers once.
+Observe-Plan-Execute sits between them: it writes a plan like ReWOO, and revises it after every step like ReAct
+adapts, at the cost of a planning call per step.

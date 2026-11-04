@@ -97,6 +97,8 @@ func main() {
   - `NewReActStrategy` ([ReAct](docs/strategies/react.md)): one model call a turn, every action a tool.
   - `NewReWOOStrategy` ([ReWOO](docs/strategies/rewoo.md)): the model plans the whole task, the agent runs the
     plan, and the model answers from what it found: two calls a turn.
+  - `NewObservePlanExecuteStrategy` ([Observe-Plan-Execute](docs/strategies/observe-plan-execute.md)): a plan the
+    model revises after every step, from what the step found, then the answer.
   - `NewGatedStrategy`, Proxias' flow: an `ActionClassifier` finds the actions the last message asks for, the agent runs
     them, and one call writes the reply. When it asks for none, the turn is the reasoning strategy's (ReAct, say).
 - **Classifiers:**

@@ -40,6 +40,10 @@ const (
 	// StrategyReWOO is the ReWOO strategy: a plan of the whole task, its steps
 	// run, then the answer (proxias.ReWOOCognitiveStrategy).
 	StrategyReWOO = "rewoo"
+	// StrategyObservePlanExecute is the Observe-Plan-Execute strategy: a plan
+	// revised after every step, then the answer
+	// (proxias.ObservePlanExecuteCognitiveStrategy).
+	StrategyObservePlanExecute = "observe-plan-execute"
 )
 
 // Strategies are all the strategies, in the order of the bench.
@@ -49,6 +53,7 @@ var Strategies = []string{
 	StrategyGatedComposite,
 	StrategyGatedSplit,
 	StrategyReWOO,
+	StrategyObservePlanExecute,
 }
 
 // aliases are the names the strategies had as shells.
@@ -257,6 +262,11 @@ func (env Env) StrategyOf(kind string, onClaude bool, script Script) proxias.Cog
 			return proxias.NewReWOOStrategy(env.llm(true, nil))
 		}
 		return proxias.NewReWOOStrategy(reWOOScript(script))
+	case StrategyObservePlanExecute:
+		if onClaude {
+			return proxias.NewObservePlanExecuteStrategy(env.llm(true, nil))
+		}
+		return proxias.NewObservePlanExecuteStrategy(observePlanExecuteScript(script))
 	default:
 		log.Fatalf("-strategy %q: it is one of %s", kind, strings.Join(Strategies, ", "))
 		return nil
@@ -304,6 +314,50 @@ func reWOOScript(script Script) proxias.LLM {
 	}
 }
 
+// observePlanExecuteScript is the scripted Claude of the Observe-Plan-Execute
+// strategy: its plans are, for each turn it plans, the requests left after
+// each step, then none; its answers are the task's synthesis when it ran
+// actions and its reasoning otherwise, then the reasoning left (an agent
+// without actions is asked no plan).
+func observePlanExecuteScript(script Script) proxias.LLM {
+	var plans, answers []string
+	synthesis, reasoning := 0, 0
+	for _, requests := range script.Requests {
+		for left := range requests {
+			steps := make([]map[string]any, 0, len(requests)-left)
+			for _, request := range requests[left:] {
+				step := map[string]any{
+					"action": request.ActionID,
+					"input":  request.Params,
+				}
+				steps = append(steps, step)
+			}
+			plan, _ := json.Marshal(map[string]any{"steps": steps}) // the params of a script marshal
+			plans = append(plans, string(plan)+Done)
+		}
+		plans = append(plans, `{"steps":[]}`+Done)
+
+		if len(requests) > 0 && synthesis < len(script.Syntheses) {
+			answers = append(answers, script.Syntheses[synthesis]+Done)
+			synthesis++
+			continue
+		}
+		if reasoning < len(script.Reasoning) {
+			answers = append(answers, script.Reasoning[reasoning])
+			reasoning++
+		}
+	}
+	for range 32 {
+		plans = append(plans, `{"steps":[]}`+Done)
+	}
+	answers = append(answers, script.Reasoning[reasoning:]...)
+
+	return plannedLLM{
+		planner:  scriptedLLM(plans),
+		answerer: scriptedLLM(answers),
+	}
+}
+
 // plannedLLM is the scripted model of a strategy that plans: the planner
 // answers the calls whose system prompt opens with a plan prompt, the answerer
 // the others.
@@ -327,6 +381,9 @@ func isPlanRequest(req proxias.LLMRequest) bool {
 	}
 	for _, part := range req.Messages[0].Parts {
 		if strings.HasPrefix(part.Text, proxias.DefaultReWOOPlanPrompt) {
+			return true
+		}
+		if strings.HasPrefix(part.Text, proxias.DefaultObservePlanExecutePlanPrompt) {
 			return true
 		}
 	}
