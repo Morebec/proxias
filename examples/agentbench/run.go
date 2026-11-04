@@ -26,9 +26,9 @@ func (r *run) strategy(script agentdemo.Script) proxias.CognitiveStrategy {
 }
 
 // timed is the agent with its turns timed (a middleware of the bench), and its
-// executions when its strategy is gated.
-func (r *run) timed(a proxias.Agent, strategy proxias.CognitiveStrategy) proxias.Agent {
-	a = timedExecution(a, strategy, r.t)
+// executions.
+func (r *run) timed(a proxias.Agent) proxias.Agent {
+	a = timedExecution(a, r.t)
 	timer := func(next proxias.CognitiveStrategy) proxias.CognitiveStrategy {
 		return proxias.StrategyFunc(
 			func(ctx context.Context, inv proxias.Invocation) iter.Seq[proxias.StreamUpdate] {
@@ -74,7 +74,7 @@ func (r *run) loop(
 	s proxias.Session,
 	strategy proxias.CognitiveStrategy,
 ) (proxias.Session, []proxias.Event, error) {
-	timed := r.timed(a, strategy)
+	timed := r.timed(a)
 	stream, err := timed.Loop(ctx, s, strategy)
 	if err != nil {
 		return s, nil, err
@@ -120,7 +120,7 @@ func (r *run) watch(
 		incoming <- e
 	}
 	close(incoming)
-	timed := r.timed(a, strategy)
+	timed := r.timed(a)
 	stream, err := timed.Watch(ctx, proxias.NewSession(), incoming, strategy)
 	if err != nil {
 		return nil, err

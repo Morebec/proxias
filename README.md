@@ -99,15 +99,13 @@ func main() {
     plan, and the model answers from what it found: two calls a turn.
   - `NewObservePlanExecuteStrategy` ([Observe-Plan-Execute](docs/strategies/observe-plan-execute.md)): a plan the
     model revises after every step, from what the step found, then the answer.
-  - `NewGatedStrategy`, Proxias' flow: an `ActionClassifier` finds the actions the last message asks for, the agent runs
-    them, and one call writes the reply. When it asks for none, the turn is the reasoning strategy's (ReAct, say).
-- **Classifiers:**
-  - `LLMActionClassifier`, in a single call;
-  - `CompositeActionClassifier`, an `ActionSelector` then an `ActionParameterExtractor`, to mix and match:
-    `LLMActionSelector` or `System1ActionSelector`, then `LLMActionParameterExtractor`.
+  - `NewAdaptiveStrategy` ([Adaptive](docs/strategies/adaptive.md)): a `StrategySelector` chooses one of named
+    candidate strategies for each task, and the task keeps to it.
+- **Strategy selectors:** `LLMStrategySelector`, in a single call, and `System1StrategySelector`, a System One model's
+  choice kept above its threshold.
 - **Prompts:** every prompt is a field of what uses it, its default an exported constant to use or extend
-  (`DefaultReActPrompt`, `DefaultLLMClassificationPrompt`, `DefaultLLMSelectionPrompt`, `DefaultLLMExtractionPrompt`,
-  `DefaultSynthesisPrompt`, and `adapters.DefaultChoicePrompt`...).
+  (`DefaultReActPrompt`, `DefaultReWOOPlanPrompt`, `DefaultObservePlanExecutePlanPrompt`,
+  `DefaultLLMStrategySelectionPrompt`, and `adapters.DefaultChoicePrompt`...).
 - **Models:**
   - `adapters/anthropic` (Claude: thinking, caching, usage counting);
   - `adapters/openai` (Chat Completions);
@@ -137,5 +135,5 @@ func main() {
 - **Vendor quirks live in the adapters.** What a vendor's API refuses or requires is that adapter's concern, not the
   strategies'.
 - **The loop is outside the strategy.** A strategy takes one turn; `Loop` and `Watch` decide when to take another.
-- **Everything is replaceable.** Strategies, classifiers, prompts, executors, memory and models are interfaces or
+- **Everything is replaceable.** Strategies, selectors, prompts, executors, memory and models are interfaces or
   fields, with defaults.

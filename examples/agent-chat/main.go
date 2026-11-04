@@ -1,7 +1,7 @@
 // Command agent-chat is an assistant with one action, chatted with in one
 // session, or served over HTTP (-serve) with one of the transports
-// (-transport). It runs on a script; -claude runs it on Claude, -strategy=gated
-// on the gated strategy.
+// (-transport). It runs on a script; -claude runs it on Claude, -strategy on
+// another strategy (-strategy=adaptive, say).
 //
 //	go run ./examples/agent-chat
 //

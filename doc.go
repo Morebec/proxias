@@ -10,15 +10,15 @@
 // takes.
 //
 // How an agent thinks is a CognitiveStrategy, one turn at a time:
-// NewReActStrategy (one model call, every action a tool), NewGatedStrategy (an
-// ActionClassifier, an LLMActionClassifier in one call or a
-// CompositeActionClassifier of an ActionSelector and an
-// ActionParameterExtractor, finds the executions, the agent runs them, one
-// synthesis), or the app's own. Each prompt is a field of what uses it, its
-// default an exported constant (DefaultReActPrompt...). Strategies are
-// vendor-neutral over two model interfaces: LLM, and System1Model (a System One
-// model: questions about
-// a state, answered with probabilities), which adapters implement.
+// NewReActStrategy (one model call a turn, every action a tool), NewReWOOStrategy
+// (a plan of the whole task, its steps run, then the answer), and
+// NewObservePlanExecuteStrategy (a plan revised after every step), or the
+// app's own. NewAdaptiveStrategy chooses one of them for each task, with a
+// StrategySelector (LLMStrategySelector, or System1StrategySelector). Each
+// prompt is a field of what uses it, its default an exported constant
+// (DefaultReActPrompt...). Strategies are vendor-neutral over two model
+// interfaces: LLM, and System1Model (a System One model: questions about a
+// state, answered with probabilities), which adapters implement.
 //
 // Agent.Invoke takes one turn, Agent.Loop takes turns until one completes,
 // executing the actions requested between them, and Agent.Watch Loops on each

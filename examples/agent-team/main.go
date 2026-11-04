@@ -2,7 +2,7 @@
 // manager delegates to a researcher (asking it is one of the manager's actions,
 // agentdemo.Ask), then two agents talk in turn. It runs on scripts; -claude
 // runs it
-// on Claude, -strategy=gated on the gated strategy.
+// on Claude, -strategy on another strategy (-strategy=adaptive, say).
 package main
 
 import (

@@ -1,6 +1,7 @@
 // Command agent-unattended runs an agent with nobody talking to it: it watches
 // a probe of a system, and decides on its own whether to act. It runs on a
-// script; -claude runs it on Claude, -strategy=gated on the gated strategy.
+// script; -claude runs it on Claude, -strategy on another strategy
+// (-strategy=adaptive, say).
 package main
 
 import (

@@ -3,9 +3,9 @@
 // strategy, how often the task succeeded, the mean and spread of the calls to
 // Claude, their tokens and cost, and the time a run took: in all, to its first
 // action request or reply, per call to Claude, per turn of the scenario's
-// agents, and per stage of the gated strategies (summed over a run; a delegated
-// agent's stages count in the run, inside the execute stage of the agent that
-// asked it).
+// agents, in the adaptive strategies' choices and in the agents' executions
+// (summed over a run; a delegated agent's count in the run, inside the
+// execution of the agent that asked it).
 //
 // Runs go -parallel at a time, each with its own agents, sessions and counters.
 // A call is never retried: a rate limit (429) fails its run, and is counted.
@@ -57,7 +57,7 @@ var (
 		"",
 		"the strategies to compare, comma separated; by default all of "+
 			"them for basic, "+agentdemo.StrategyReAct+" and "+
-			agentdemo.StrategyGated+" for catalog",
+			agentdemo.StrategyAdaptive+" for catalog",
 	)
 	scenarios = flag.String("scenarios", "", "the scenarios to run, comma separated; all when empty")
 	verbose   = flag.Bool("v", false, "print the events of each run")
@@ -96,9 +96,8 @@ type measure struct {
 	firstEvent float64
 	// turns are the turns of the run's agents, and perTurn their mean duration.
 	turns, perTurn float64
-	// stages is the time spent in each stage of the gated strategies, summed
-	// over the run.
-	stages map[gatedStage]float64
+	// stages is the time spent in each stage, summed over the run.
+	stages map[stage]float64
 	// events are the events of the run, printed with -v.
 	events []string
 }
@@ -110,12 +109,10 @@ func (m measure) dollars() float64 {
 	return cost / 1e6
 }
 
-// stages are the stages of the gated strategy, in the order of the table.
-var stages = []gatedStage{
-	stageClassify,
+// stages are the stages, in the order of the table.
+var stages = []stage{
+	stageSelect,
 	stageExecute,
-	stageSynthesize,
-	stageReasoning,
 }
 
 // timing records the times and the events of a run as they come.
@@ -124,7 +121,7 @@ type timing struct {
 	began      time.Time
 	firstEvent time.Duration
 	turns      []time.Duration
-	stages     map[gatedStage]time.Duration
+	stages     map[stage]time.Duration
 	events     []string
 }
 
@@ -154,7 +151,7 @@ func (t *timing) cognition(d time.Duration) {
 	t.turns = append(t.turns, d)
 }
 
-func (t *timing) stage(s gatedStage, d time.Duration) {
+func (t *timing) stage(s stage, d time.Duration) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.stages[s] += d
@@ -177,7 +174,7 @@ func main() {
 	if kinds == "" {
 		kinds = strings.Join(agentdemo.Strategies, ",")
 		if *suite == "catalog" {
-			kinds = agentdemo.StrategyReAct + "," + agentdemo.StrategyGated
+			kinds = agentdemo.StrategyReAct + "," + agentdemo.StrategyAdaptive
 		}
 	}
 	suites := map[string]func() []scenario{
@@ -252,7 +249,7 @@ func main() {
 // runOnce runs the scenario of the cell once, on its strategy, in an env of its
 // own.
 func runOnce(c cell, onClaude bool) measure {
-	t := &timing{stages: map[gatedStage]time.Duration{}}
+	t := &timing{stages: map[stage]time.Duration{}}
 	env := agentdemo.Env{
 		Counter: &agentanthropic.UsageCounter{},
 	}
@@ -282,7 +279,7 @@ func runOnce(c cell, onClaude bool) measure {
 		millis:      float64(time.Since(t.began).Milliseconds()),
 		firstEvent:  ms(t.firstEvent),
 		turns:       float64(len(t.turns)),
-		stages:      map[gatedStage]float64{},
+		stages:      map[stage]float64{},
 		events:      t.events,
 	}
 	if usage.Calls > 0 {
@@ -295,8 +292,8 @@ func runOnce(c cell, onClaude bool) measure {
 	if len(t.turns) > 0 {
 		m.perTurn = ms(took) / float64(len(t.turns))
 	}
-	for stage, d := range t.stages {
-		m.stages[stage] = ms(d)
+	for s, d := range t.stages {
+		m.stages[s] = ms(d)
 	}
 	return m
 }
@@ -313,7 +310,7 @@ func report(cells []cell, measures [][]measure) {
 	fmt.Fprintln(
 		times,
 		"scenario\tstrategy\tms\tms p50/p90\tfirst event ms\tfirst event p50/p90\tms per call\tturns\tms per "+
-			"turn\tclassify ms\texecute ms\tsynthesize ms\treasoning ms\t",
+			"turn\tselect ms\texecute ms\t",
 	)
 	var (
 		total       measure
@@ -368,10 +365,10 @@ func report(cells []cell, measures [][]measure) {
 			stat(ms, func(m measure) float64 { return m.turns }),
 			stat(ms, func(m measure) float64 { return m.perTurn }),
 		)
-		for _, stage := range stages {
+		for _, s := range stages {
 			row = append(
 				row,
-				stat(ms, func(m measure) float64 { return m.stages[stage] }),
+				stat(ms, func(m measure) float64 { return m.stages[s] }),
 			)
 		}
 		fmt.Fprintln(times, strings.Join(row, "\t")+"\t")

@@ -2,38 +2,38 @@ package main
 
 import (
 	"context"
-	"iter"
 	"time"
 
 	"github.com/morebec/proxias"
 )
 
-// gatedStage is a stage of a gated turn, as the bench times it.
-type gatedStage string
+// stage is a part of a turn the bench times, summed over a run.
+type stage string
 
-// The stages of a gated turn.
+// The stages the bench times.
 const (
-	stageClassify   gatedStage = "classify"
-	stageExecute    gatedStage = "execute"
-	stageSynthesize gatedStage = "synthesize"
-	stageReasoning  gatedStage = "reasoning"
+	// stageSelect is the adaptive strategies' choice of a strategy.
+	stageSelect stage = "select"
+	// stageExecute is the agents' executions of their actions, whatever their
+	// strategy.
+	stageExecute stage = "execute"
 )
 
-// timedClassifier is the classifier, each classification timed.
-type timedClassifier struct {
-	proxias.ActionClassifier
+// timedSelector is the selector, each choice timed.
+type timedSelector struct {
+	proxias.StrategySelector
 	t *timing
 }
 
-// Classify classifies, timed.
-func (c timedClassifier) Classify(
+// Select selects, timed.
+func (s timedSelector) Select(
 	ctx context.Context,
 	inv proxias.Invocation,
-	actions []proxias.ActionDescriptor,
-) ([]proxias.ActionExecutionRequest, error) {
+	candidates []proxias.StrategyCandidate,
+) (string, error) {
 	began := time.Now()
-	defer func() { c.t.stage(stageClassify, time.Since(began)) }()
-	return c.ActionClassifier.Classify(ctx, inv, actions)
+	defer func() { s.t.stage(stageSelect, time.Since(began)) }()
+	return s.StrategySelector.Select(ctx, inv, candidates)
 }
 
 // timedExecutor is the agent's actions, each execution timed.
@@ -53,67 +53,24 @@ func (e timedExecutor) Execute(
 	return e.ActionExecutor.Execute(ctx, s, requests)
 }
 
-// timedSynthesizer is the synthesizer, each synthesis timed to its last chunk.
-type timedSynthesizer struct {
-	proxias.LLM
-	t *timing
-}
-
-// Complete completes, timed.
-func (l timedSynthesizer) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[proxias.LLMChunk, error] {
-	return func(yield func(proxias.LLMChunk, error) bool) {
-		began := time.Now()
-		defer func() { l.t.stage(stageSynthesize, time.Since(began)) }()
-		for c, err := range l.LLM.Complete(ctx, req) {
-			if !yield(c, err) {
-				return
-			}
-		}
-	}
-}
-
-// timedReasoning is the reasoning, each of its turns timed.
-func timedReasoning(reasoning proxias.CognitiveStrategy, t *timing) proxias.CognitiveStrategy {
-	return proxias.StrategyFunc(
-		func(ctx context.Context, inv proxias.Invocation) iter.Seq[proxias.StreamUpdate] {
-			return func(yield func(proxias.StreamUpdate) bool) {
-				began := time.Now()
-				defer func() { t.stage(stageReasoning, time.Since(began)) }()
-				for u := range reasoning.Invoke(ctx, inv) {
-					if !yield(u) {
-						return
-					}
-				}
-			}
-		},
-	)
-}
-
-// timedStages is the strategy with its stages timed, when it is gated: its
-// classifier, its synthesizer and its reasoning decorated.
+// timedStages is the strategy with its choices timed, when it is adaptive: its
+// selector decorated.
 func timedStages(strategy proxias.CognitiveStrategy, t *timing) proxias.CognitiveStrategy {
-	gated, isGated := strategy.(proxias.GatedCognitiveStrategy)
-	if !isGated {
+	adaptive, isAdaptive := strategy.(proxias.AdaptiveCognitiveStrategy)
+	if !isAdaptive {
 		return strategy
 	}
 
-	gated.Classifier = timedClassifier{
-		ActionClassifier: gated.Classifier,
+	adaptive.Selector = timedSelector{
+		StrategySelector: adaptive.Selector,
 		t:                t,
 	}
-	gated.Synthesizer = timedSynthesizer{
-		LLM: gated.Synthesizer,
-		t:   t,
-	}
-	gated.Reasoning = timedReasoning(gated.Reasoning, t)
-	return gated
+	return adaptive
 }
 
-// timedExecution is the agent with its executions timed, when its strategy is
-// gated.
-func timedExecution(a proxias.Agent, strategy proxias.CognitiveStrategy, t *timing) proxias.Agent {
-	_, isGated := strategy.(proxias.GatedCognitiveStrategy)
-	if !isGated || a.ActionExecutor == nil {
+// timedExecution is the agent with its executions timed.
+func timedExecution(a proxias.Agent, t *timing) proxias.Agent {
+	if a.ActionExecutor == nil {
 		return a
 	}
 
