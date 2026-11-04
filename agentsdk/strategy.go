@@ -13,14 +13,11 @@ type CognitiveStrategy interface {
 	Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate]
 }
 
-// Invocation is what a turn is given: the agent, its session, and the mode it
-// is invoked in.
+// Invocation is what a turn is given: the agent and its session. What the
+// agent remembers, NewAgentPrompt recalls.
 type Invocation struct {
 	Agent   Agent
 	Session Session
-	// Memories are what the agent's memory recalled for the turn: not events of
-	// the session.
-	Memories []Event
 }
 
 // LastEvent is the last event of the invocation's session.

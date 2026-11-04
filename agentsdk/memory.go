@@ -10,7 +10,7 @@ import (
 )
 
 // MemoryProvider is an agent's memory beyond a session: what it recalls for a
-// turn (Invocation.Memories), what it memorizes of one, and the actions the
+// turn (in NewAgentPrompt), what it memorizes of one, and the actions the
 // agent curates it with. What bears on a turn, what is worth keeping, and whose
 // memory it is (the invocation's session, and the session the actions run on,
 // say who the agent deals with) are its own decisions.

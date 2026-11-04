@@ -343,3 +343,159 @@ func TestNewLLMRequestFromSession(t *testing.T) {
 		})
 	}
 }
+
+func TestNewEventsFromLLMMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		given agentsdk.LLMMessage
+		// then is each event's type, source, and payload; its ID too when it is
+		// a request's (the call's) or the message's.
+		then []string
+	}{
+		{
+			name: "GIVEN text THEN it is a message of the agent",
+			given: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Text: "Hello John."},
+				},
+			},
+			then: []string{
+				"message agent:ada Hello John.",
+			},
+		},
+		{
+			name: "GIVEN no text THEN it is an empty message: silence",
+			given: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Text: ""},
+				},
+			},
+			then: []string{
+				"message agent:ada ",
+			},
+		},
+		{
+			name: "GIVEN thinking, signed and redacted, then text THEN the thoughts, kept whole, come before the message",
+			given: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{
+						Thinking:  "The user greets me.",
+						Signature: "sig",
+					},
+					{RedactedThinking: "secret"},
+					{Text: "Hello John."},
+				},
+			},
+			then: []string{
+				`cognition.thought agent:ada {"Text":"","ToolCall":null,"Thinking":"The user greets me.","Signature":"sig","RedactedThinking":""}`,
+				`cognition.thought agent:ada {"Text":"","ToolCall":null,"Thinking":"","Signature":"","RedactedThinking":"secret"}`,
+				"message agent:ada Hello John.",
+			},
+		},
+		{
+			name: "GIVEN text and tool calls THEN the text is a thought, before the requests of the calls' IDs",
+			given: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{
+						ToolCall: &agentsdk.LLMToolCall{
+							ID:   "toolu_1",
+							Name: "send_email",
+							Input: map[string]any{
+								"to": "joe",
+							},
+						},
+					},
+					{
+						ToolCall: &agentsdk.LLMToolCall{
+							ID:   "toolu_2",
+							Name: "page_oncall",
+						},
+					},
+					{Text: "An email, and a page."},
+				},
+			},
+			then: []string{
+				"cognition.thought agent:ada An email, and a page.",
+				`action.request agent:ada toolu_1 {"action_id":"send_email","params":{"to":"joe"}}`,
+				`action.request agent:ada toolu_2 {"action_id":"page_oncall"}`,
+			},
+		},
+		{
+			name: "GIVEN a message of an ID THEN its text is a message of that ID: the event its chunks were streamed for",
+			given: agentsdk.LLMMessage{
+				ID:   "m1",
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{Text: "Hello John."},
+				},
+			},
+			then: []string{
+				"message agent:ada m1 Hello John.",
+			},
+		},
+		{
+			name: "GIVEN a message of an ID, with a tool call THEN its text is a thought of that ID",
+			given: agentsdk.LLMMessage{
+				ID:   "m1",
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{
+						ToolCall: &agentsdk.LLMToolCall{
+							ID:   "toolu_1",
+							Name: "send_email",
+						},
+					},
+					{Text: "An email."},
+				},
+			},
+			then: []string{
+				"cognition.thought agent:ada m1 An email.",
+				`action.request agent:ada toolu_1 {"action_id":"send_email"}`,
+			},
+		},
+		{
+			name: "GIVEN thinking and a tool call, without text THEN the thought, then the request",
+			given: agentsdk.LLMMessage{
+				Role: agentsdk.LLMMessageRoleAssistant,
+				Parts: []agentsdk.LLMPart{
+					{
+						Thinking:  "John wants an email.",
+						Signature: "sig",
+					},
+					{
+						ToolCall: &agentsdk.LLMToolCall{
+							ID:   "toolu_1",
+							Name: "send_email",
+						},
+					},
+					{Text: ""},
+				},
+			},
+			then: []string{
+				`cognition.thought agent:ada {"Text":"","ToolCall":null,"Thinking":"John wants an email.","Signature":"sig","RedactedThinking":""}`,
+				`action.request agent:ada toolu_1 {"action_id":"send_email"}`,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := agentsdk.NewEventsFromLLMMessage(agentsdk.NewAgentSource("ada"), tt.given)
+
+			got := make([]string, 0, len(events))
+			for _, e := range events {
+				assert.NotEmpty(t, e.ID, "the events are whole")
+				assert.False(t, e.Date.IsZero(), "the events are dated")
+				line := string(e.Type) + " " + e.Source.String() + " "
+				if e.Type == agentsdk.EventTypeActionRequest || e.ID == tt.given.ID {
+					line += string(e.ID) + " "
+				}
+				got = append(got, line+e.Text())
+			}
+			assert.Equal(t, tt.then, got)
+		})
+	}
+}

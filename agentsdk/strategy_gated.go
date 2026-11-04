@@ -6,7 +6,6 @@ import (
 	"iter"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -165,18 +164,22 @@ func (g GatedCognitiveStrategy) synthesize(
 	executedEvents []Event,
 	yield func(StreamUpdate) bool,
 ) {
-	agent := inv.Agent
-	var (
-		thoughts []Event
-		text     strings.Builder
-		textID   = EventID(uuid.NewString())
-		stop     StopReason
-	)
 	llmRequest, err := g.synthesisRequest(ctx, inv, executedEvents)
 	if err != nil {
 		yield(StreamUpdate{Err: err})
 		return
 	}
+
+	// The synthesizer's answer, its text streamed as it comes, gathered into
+	// one message.
+	message := LLMMessage{
+		ID:   EventID(uuid.NewString()),
+		Role: LLMMessageRoleAssistant,
+	}
+	var (
+		text strings.Builder
+		stop StopReason
+	)
 	for chunk, err := range g.Synthesizer.Complete(ctx, llmRequest) {
 		switch {
 		case err != nil:
@@ -185,30 +188,30 @@ func (g GatedCognitiveStrategy) synthesize(
 		case chunk.StopReason != "":
 			stop = chunk.StopReason
 		case chunk.isThinking():
-			thoughts = append(thoughts, NewThoughtEvent(agent.AsSource(), chunk))
+			thinking := LLMPart{
+				Thinking:         chunk.Thinking,
+				Signature:        chunk.Signature,
+				RedactedThinking: chunk.RedactedThinking,
+			}
+			message.Parts = append(message.Parts, thinking)
 		case chunk.Text != "":
 			text.WriteString(chunk.Text)
-			if !yield(
-				StreamUpdate{
-					Chunk: &StreamChunk{
-						EventID: textID,
-						Data:    []byte(chunk.Text),
-					},
+			update := StreamUpdate{
+				Chunk: &StreamChunk{
+					EventID: message.ID,
+					Data:    []byte(chunk.Text),
 				},
-			) {
+			}
+			if !yield(update) {
 				return
 			}
 		}
 	}
+	reply := strings.TrimSpace(text.String())
+	message.Parts = append(message.Parts, LLMPart{Text: reply})
 
-	reply := Event{
-		ID:      textID,
-		Type:    EventTypeMessage,
-		Source:  agent.AsSource(),
-		Payload: []byte(strings.TrimSpace(text.String())),
-		Date:    time.Now(),
-	}
-	yield(StreamUpdate{Events: append(thoughts, reply), StopReason: stop})
+	events := NewEventsFromLLMMessage(inv.Agent.AsSource(), message)
+	yield(StreamUpdate{Events: events, StopReason: stop})
 }
 
 // synthesisRequest is the request of the synthesis: its prompt and who the

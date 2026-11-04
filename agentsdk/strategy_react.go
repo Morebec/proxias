@@ -7,7 +7,6 @@ import (
 	"iter"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -86,24 +85,24 @@ func (s ReActCognitiveStrategy) reason(
 	return s.handleResponse(currentAgent, response, yield)
 }
 
-// handleResponse streams the model's answer: its text as it comes, its thinking
-// kept whole (to be given back as it came), its tool calls as requests. Without
-// tool calls, its reply ends the turn. With them, it yields its thoughts and
-// the requests, and returns the requests and the events it yielded, ending with
-// the requests'. It returns no request when the turn ended. The model's stop
-// reason is passed on as it is.
+// handleResponse streams the model's answer, its text as it comes, gathers it
+// into one message, and yields the events it is (NewEventsFromLLMMessage),
+// with the model's stop reason as it is. It returns the requests and the
+// events, ending with the requests', or no request when the turn ended.
 func (s ReActCognitiveStrategy) handleResponse(
 	currentAgent EventSource,
 	response iter.Seq2[LLMChunk, error],
 	yield func(StreamUpdate) bool,
 ) ([]ActionExecutionRequest, []Event) {
+	// The text is streamed as chunks of the message's event.
+	message := LLMMessage{
+		ID:   EventID(uuid.NewString()),
+		Role: LLMMessageRoleAssistant,
+	}
 	var (
-		thoughts      []Event
-		requests      []ActionExecutionRequest
-		requestEvents []Event
-		text          strings.Builder
-		textID        = EventID(uuid.NewString())
-		stop          StopReason
+		requests []ActionExecutionRequest
+		text     strings.Builder
+		stop     StopReason
 	)
 	for chunk, err := range response {
 		switch {
@@ -115,27 +114,26 @@ func (s ReActCognitiveStrategy) handleResponse(
 			stop = chunk.StopReason
 
 		case chunk.isThinking():
-			thoughts = append(thoughts, NewThoughtEvent(currentAgent, chunk))
+			thinking := LLMPart{
+				Thinking:         chunk.Thinking,
+				Signature:        chunk.Signature,
+				RedactedThinking: chunk.RedactedThinking,
+			}
+			message.Parts = append(message.Parts, thinking)
 
 		case chunk.ToolCall != nil:
+			message.Parts = append(message.Parts, LLMPart{ToolCall: chunk.ToolCall})
 			request := ActionExecutionRequest{
 				ActionID: chunk.ToolCall.Name,
 				Params:   chunk.ToolCall.Input,
 			}
-			requestEvent, err := NewActionExecutionRequestEvent(currentAgent, request)
-			if err != nil {
-				yield(StreamUpdate{Err: err})
-				return nil, nil
-			}
-			requestEvent.ID = EventID(chunk.ToolCall.ID) // the result names the call
 			requests = append(requests, request)
-			requestEvents = append(requestEvents, requestEvent)
 
 		case chunk.Text != "":
 			text.WriteString(chunk.Text)
 			update := StreamUpdate{
 				Chunk: &StreamChunk{
-					EventID: textID,
+					EventID: message.ID,
 					Data:    []byte(chunk.Text),
 				},
 			}
@@ -144,27 +142,10 @@ func (s ReActCognitiveStrategy) handleResponse(
 			}
 		}
 	}
-	reply := Event{
-		ID:      textID,
-		Type:    EventTypeMessage,
-		Source:  currentAgent,
-		Payload: []byte(strings.TrimSpace(text.String())),
-		Date:    time.Now(),
-	}
+	reply := strings.TrimSpace(text.String())
+	message.Parts = append(message.Parts, LLMPart{Text: reply})
 
-	// An answer without tool calls is the reply: it ends the turn.
-	if len(requests) == 0 {
-		yield(StreamUpdate{Events: append(thoughts, reply), StopReason: stop})
-		return nil, nil
-	}
-
-	// Text with tool calls is what the model thinks.
-	events := thoughts
-	if len(reply.Payload) > 0 {
-		reply.Type = EventTypeThought
-		events = append(events, reply)
-	}
-	events = append(events, requestEvents...)
+	events := NewEventsFromLLMMessage(currentAgent, message)
 	if !yield(StreamUpdate{Events: events, StopReason: stop}) {
 		return nil, nil
 	}

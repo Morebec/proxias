@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -51,6 +52,10 @@ func (c LLMActionClassifier) Classify(
 		return nil, err
 	}
 	llmRequest := NewLLMRequestFromSession(inv.Agent.AsSource(), inv.Session)
+	agentPrompt, err := NewAgentPrompt(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
 	instructions := []LLMMessage{
 		{
 			Role:  LLMMessageRoleSystem,
@@ -60,21 +65,12 @@ func (c LLMActionClassifier) Classify(
 			Role:  LLMMessageRoleSystem,
 			Parts: []LLMPart{{Text: string(inventory)}},
 		},
+		{
+			Role:  LLMMessageRoleSystem,
+			Parts: []LLMPart{{Text: agentPrompt.String()}},
+		},
 	}
-	if len(inv.Memories) > 0 {
-		remembered := "# What you remember"
-		for _, memory := range inv.Memories {
-			remembered += "\n- " + memory.Text()
-		}
-		instructions = append(
-			instructions,
-			LLMMessage{
-				Role:  LLMMessageRoleSystem,
-				Parts: []LLMPart{{Text: remembered}},
-			},
-		)
-	}
-	llmRequest.Messages = append(instructions, llmRequest.Messages...)
+	llmRequest.Messages = slices.Insert(llmRequest.Messages, 0, instructions...)
 	var text strings.Builder
 	for chunk, err := range c.LLM.Complete(ctx, llmRequest) {
 		if err != nil {
@@ -189,6 +185,10 @@ func (s LLMActionSelector) Select(
 		return nil, err
 	}
 	llmRequest := NewLLMRequestFromSession(inv.Agent.AsSource(), inv.Session)
+	agentPrompt, err := NewAgentPrompt(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
 	instructions := []LLMMessage{
 		{
 			Role:  LLMMessageRoleSystem,
@@ -198,21 +198,12 @@ func (s LLMActionSelector) Select(
 			Role:  LLMMessageRoleSystem,
 			Parts: []LLMPart{{Text: string(inventory)}},
 		},
+		{
+			Role:  LLMMessageRoleSystem,
+			Parts: []LLMPart{{Text: agentPrompt.String()}},
+		},
 	}
-	if len(inv.Memories) > 0 {
-		remembered := "# What you remember"
-		for _, memory := range inv.Memories {
-			remembered += "\n- " + memory.Text()
-		}
-		instructions = append(
-			instructions,
-			LLMMessage{
-				Role:  LLMMessageRoleSystem,
-				Parts: []LLMPart{{Text: remembered}},
-			},
-		)
-	}
-	llmRequest.Messages = append(instructions, llmRequest.Messages...)
+	llmRequest.Messages = slices.Insert(llmRequest.Messages, 0, instructions...)
 	var text strings.Builder
 	for chunk, err := range s.LLM.Complete(ctx, llmRequest) {
 		if err != nil {
@@ -283,21 +274,15 @@ func (s System1ActionSelector) Select(
 	// The state is the session as the request of a model, as JSON: its
 	// instructions and its messages.
 	llmRequest := NewLLMRequestFromSession(inv.Agent.AsSource(), inv.Session)
-	var instructions []LLMMessage
-	if len(inv.Memories) > 0 {
-		remembered := "# What you remember"
-		for _, memory := range inv.Memories {
-			remembered += "\n- " + memory.Text()
-		}
-		instructions = append(
-			instructions,
-			LLMMessage{
-				Role:  LLMMessageRoleSystem,
-				Parts: []LLMPart{{Text: remembered}},
-			},
-		)
+	agentPrompt, err := NewAgentPrompt(ctx, inv)
+	if err != nil {
+		return nil, err
 	}
-	llmRequest.Messages = append(instructions, llmRequest.Messages...)
+	agentInstructions := LLMMessage{
+		Role:  LLMMessageRoleSystem,
+		Parts: []LLMPart{{Text: agentPrompt.String()}},
+	}
+	llmRequest.Messages = slices.Insert(llmRequest.Messages, 0, agentInstructions)
 	state, err := json.Marshal(llmRequest)
 	if err != nil {
 		return nil, err
@@ -380,6 +365,10 @@ func (ex LLMActionParameterExtractor) ExtractParameters(
 		return nil, err
 	}
 	llmRequest := NewLLMRequestFromSession(inv.Agent.AsSource(), inv.Session)
+	agentPrompt, err := NewAgentPrompt(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
 	instructions := []LLMMessage{
 		{
 			Role:  LLMMessageRoleSystem,
@@ -389,21 +378,12 @@ func (ex LLMActionParameterExtractor) ExtractParameters(
 			Role:  LLMMessageRoleSystem,
 			Parts: []LLMPart{{Text: string(inventory)}},
 		},
+		{
+			Role:  LLMMessageRoleSystem,
+			Parts: []LLMPart{{Text: agentPrompt.String()}},
+		},
 	}
-	if len(inv.Memories) > 0 {
-		remembered := "# What you remember"
-		for _, memory := range inv.Memories {
-			remembered += "\n- " + memory.Text()
-		}
-		instructions = append(
-			instructions,
-			LLMMessage{
-				Role:  LLMMessageRoleSystem,
-				Parts: []LLMPart{{Text: remembered}},
-			},
-		)
-	}
-	llmRequest.Messages = append(instructions, llmRequest.Messages...)
+	llmRequest.Messages = slices.Insert(llmRequest.Messages, 0, instructions...)
 
 	var text strings.Builder
 	for chunk, err := range ex.LLM.Complete(ctx, llmRequest) {

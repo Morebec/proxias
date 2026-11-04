@@ -70,15 +70,6 @@ func (a *Agent) Invoke(ctx context.Context, s Session, strategy CognitiveStrateg
 		defer stream.close()
 		inv := Invocation{Agent: *a, Session: stream.Session()}
 		if a.Memory != nil {
-			memories, err := a.Memory.Recall(ctx, inv)
-			if err != nil {
-				_ = stream.send(
-					ctx,
-					StreamUpdate{Err: fmt.Errorf("recalling: %w", err)},
-				)
-				return
-			}
-			inv.Memories = memories
 			executor := a.Memory.ActionExecutor()
 			if executor != nil {
 				inv.Agent.ActionExecutor = actionsWithMemory{

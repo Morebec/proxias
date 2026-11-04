@@ -39,7 +39,7 @@ func TestAgentMemory(t *testing.T) {
 		recalled []agentsdk.Event
 		recall   error
 		memorize error
-		// told are the memories the strategy is given, memorized the events the
+		// told are the memories the agent's prompt tells, memorized the events the
 		// memory is given, then the events of the
 		// stream, err its error.
 		told, memorized, then []string
@@ -77,7 +77,8 @@ func TestAgentMemory(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var told, memorized []string
+			var told string
+			var memorized []string
 			agent := agentsdk.Agent{ID: "ada"}
 			if tt.memory {
 				agent.Memory = memory{
@@ -91,11 +92,14 @@ func TestAgentMemory(t *testing.T) {
 				}
 			}
 			strategy := agentsdk.StrategyFunc(
-				func(_ context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-					for _, m := range inv.Memories {
-						told = append(told, m.Text())
-					}
+				func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
 					return func(yield func(agentsdk.StreamUpdate) bool) {
+						agentPrompt, err := agentsdk.NewAgentPrompt(ctx, inv)
+						if err != nil {
+							yield(agentsdk.StreamUpdate{Err: err})
+							return
+						}
+						told = agentPrompt.String()
 						yield(
 							agentsdk.StreamUpdate{
 								Events: []agentsdk.Event{
@@ -121,12 +125,14 @@ func TestAgentMemory(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			var then []string
+			then := make([]string, 0, len(session.Events()))
 			for _, e := range session.Events() {
 				then = append(then, e.Text())
 			}
 			assert.Equal(t, tt.then, then)
-			assert.Equal(t, tt.told, told)
+			for _, m := range tt.told {
+				assert.Contains(t, told, m)
+			}
 			assert.Equal(t, tt.memorized, memorized)
 		})
 	}
@@ -281,7 +287,7 @@ func TestAgentMemoryActions(t *testing.T) {
 		given   map[string]string
 		from    string
 		actions bool
-		// told are the memories the turn is given, offered the actions it is
+		// told are the memories the agent's prompt tells, offered the actions it is
 		// offered, results the statuses of its requests (update_memory, then
 		// echo), then the documents after the turn.
 		told, offered, results []string
@@ -335,13 +341,14 @@ func TestAgentMemoryActions(t *testing.T) {
 					},
 				}
 			}
-			var told, offered, results []string
+			var told string
+			var offered, results []string
 			strategy := agentsdk.StrategyFunc(
 				func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
 					return func(yield func(agentsdk.StreamUpdate) bool) {
-						for _, m := range inv.Memories {
-							told = append(told, m.Text())
-						}
+						agentPrompt, err := agentsdk.NewAgentPrompt(ctx, inv)
+						require.NoError(t, err)
+						told = agentPrompt.String()
 						descriptors, err := inv.Agent.ActionExecutor.Descriptors(ctx, inv.Session)
 						require.NoError(t, err)
 						for _, d := range descriptors {
@@ -382,7 +389,9 @@ func TestAgentMemoryActions(t *testing.T) {
 			_, err = stream.Collect()
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.told, told)
+			for _, m := range tt.told {
+				assert.Contains(t, told, m)
+			}
 			assert.Equal(t, tt.offered, offered)
 			assert.Equal(t, tt.results, results)
 			assert.Equal(t, tt.then, map[string]string(memory))

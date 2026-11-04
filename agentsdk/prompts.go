@@ -2,6 +2,7 @@ package agentsdk
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -131,7 +132,7 @@ func NewAgentPrompt(ctx context.Context, inv Invocation) (*Prompt, error) {
 	}
 	memories, err := agent.Memory.Recall(ctx, inv)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("recalling: %w", err)
 	}
 	if len(memories) != 0 {
 		prompt.AddLine("What you remember: ")

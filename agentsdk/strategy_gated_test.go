@@ -648,7 +648,7 @@ func TestGatedStrategy(t *testing.T) {
 				stop   agentsdk.StopReason
 			)
 			requests := map[agentsdk.EventID]string{} // the requests' IDs are random: a result names its request by its rank
-			for u := range strategy.Invoke(context.Background(), agentsdk.Invocation{Agent: agent, Session: agentsdk.NewSession(tt.given...), Memories: tt.memories}) {
+			for u := range strategy.Invoke(context.Background(), agentsdk.Invocation{Agent: agent, Session: agentsdk.NewSession(tt.given...)}) {
 				require.NoError(t, u.Err)
 				if u.StopReason != "" {
 					stop = u.StopReason

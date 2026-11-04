@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 )
 
 // LLMMessageRole is who says a message of a conversation with a model.
@@ -43,6 +44,9 @@ type LLMRequest struct {
 
 // LLMMessage is a message of a conversation with a model.
 type LLMMessage struct {
+	// ID is the ID of the event of the message's text, when it is known: the
+	// event its streamed chunks are pieces of.
+	ID    EventID `json:",omitempty"`
 	Role  LLMMessageRole
 	Parts []LLMPart
 }
@@ -282,4 +286,74 @@ func newLLMMessageFromUnknownEvent(currentAgentSource EventSource, e Event) LLMM
 // the model of another agent.
 func externalTextPayload(e Event) string {
 	return fmt.Sprintf("[%s from %s] %s", e.Type, e.Source, e.Text())
+}
+
+// NewEventsFromLLMMessage creates the events a message of the model of the
+// current agent is, in its session: its thinking as thoughts, then its text,
+// then its tool calls as action requests (of the calls' IDs). Its text is a
+// message; with tool calls, it is a thought (text with tool calls is what the
+// model thinks), left out when empty. The mirror of NewLLMMessageFromEvent.
+func NewEventsFromLLMMessage(currentAgentSource EventSource, m LLMMessage) []Event {
+	events := newThoughtEventsFromLLMMessage(currentAgentSource, m)
+	requests := newActionRequestEventsFromLLMMessage(currentAgentSource, m)
+	if len(requests) == 0 {
+		return append(events, newMessageEventFromLLMMessage(currentAgentSource, m))
+	}
+
+	thought := newMessageEventFromLLMMessage(currentAgentSource, m)
+	if len(thought.Payload) > 0 {
+		thought.Type = EventTypeThought
+		events = append(events, thought)
+	}
+	return append(events, requests...)
+}
+
+// newThoughtEventsFromLLMMessage: the message's thinking, signed or not, is
+// its thoughts, kept whole.
+func newThoughtEventsFromLLMMessage(currentAgentSource EventSource, m LLMMessage) []Event {
+	var thoughts []Event
+	for _, part := range m.Parts {
+		chunk := LLMChunk{
+			Thinking:         part.Thinking,
+			Signature:        part.Signature,
+			RedactedThinking: part.RedactedThinking,
+		}
+		if chunk.isThinking() {
+			thoughts = append(thoughts, NewThoughtEvent(currentAgentSource, chunk))
+		}
+	}
+	return thoughts
+}
+
+// newMessageEventFromLLMMessage: the message's text is a message, of the
+// message's ID when it has one, empty when it says nothing.
+func newMessageEventFromLLMMessage(currentAgentSource EventSource, m LLMMessage) Event {
+	var text strings.Builder
+	for _, part := range m.Parts {
+		text.WriteString(part.Text)
+	}
+	e := NewMessageEvent(currentAgentSource, strings.TrimSpace(text.String()))
+	if m.ID != "" {
+		e.ID = m.ID
+	}
+	return e
+}
+
+// newActionRequestEventsFromLLMMessage: the message's tool calls are action
+// requests, of the calls' IDs, which their results name.
+func newActionRequestEventsFromLLMMessage(currentAgentSource EventSource, m LLMMessage) []Event {
+	var requests []Event
+	for _, part := range m.Parts {
+		if part.ToolCall == nil {
+			continue
+		}
+		request := ActionExecutionRequest{
+			ActionID: part.ToolCall.Name,
+			Params:   part.ToolCall.Input,
+		}
+		e, _ := NewActionExecutionRequestEvent(currentAgentSource, request) // the input of a call was JSON
+		e.ID = EventID(part.ToolCall.ID)
+		requests = append(requests, e)
+	}
+	return requests
 }
