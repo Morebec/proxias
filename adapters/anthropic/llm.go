@@ -20,9 +20,15 @@ const DefaultMaxTokens = 4096
 
 // LLM is Claude as an proxias.LLM. Make it with NewLLM.
 type LLM struct {
-	client    anthropic.Client
-	model     anthropic.Model
-	maxTokens int64
+	client anthropic.Client
+	model  anthropic.Model
+	// MaxTokens is the tokens an answer may take: DefaultMaxTokens by default.
+	MaxTokens int64
+	// InstructionsTTL is how long the system prompt (and the tools before it)
+	// stays cached: Claude's default (5 minutes) when empty, or
+	// anthropic.CacheControlEphemeralTTLTTL1h for instructions that every
+	// conversation shares and that a person may come back to after a pause.
+	InstructionsTTL anthropic.CacheControlEphemeralTTL
 	// Thinking configures Claude's thinking, sent as is when set: for example
 	// adaptive thinking that returns a summary of it, {OfAdaptive:
 	// &anthropic.ThinkingConfigAdaptiveParam{Display:
@@ -39,15 +45,16 @@ type LLM struct {
 var _ proxias.LLM = LLM{}
 
 // NewLLM returns the model of the client as an proxias.LLM: the system prompt
-// is cached (with the tools, which come before it), the conversation is
-// Claude's (tool calls as tool_use blocks, their results as tool_result
-// blocks), and the
+// is cached (with the tools, which come before it), and so is the conversation
+// so far (its automatic breakpoint moves to its end at every call, so the
+// turns of a loop read it from the cache); the conversation is Claude's (tool
+// calls as tool_use blocks, their results as tool_result blocks), and the
 // answer is streamed (Buffered reads it whole).
 func NewLLM(client anthropic.Client, model anthropic.Model) LLM {
 	return LLM{
 		client:    client,
 		model:     model,
-		maxTokens: DefaultMaxTokens,
+		MaxTokens: DefaultMaxTokens,
 	}
 }
 
@@ -76,15 +83,17 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 
 		params := anthropic.MessageNewParams{
-			Model:     m.model,
-			MaxTokens: m.maxTokens,
-			System:    system,
-			Messages:  m.mapMessages(req.Messages[instructions:], len(req.Tools) > 0),
-			Thinking:  m.Thinking,
+			Model:        m.model,
+			MaxTokens:    m.MaxTokens,
+			System:       system,
+			Messages:     m.mapMessages(req.Messages[instructions:], len(req.Tools) > 0),
+			Thinking:     m.Thinking,
+			CacheControl: anthropic.NewCacheControlEphemeralParam(),
 		}
 		if len(params.System) > 0 {
 			last := len(params.System) - 1
 			cacheControl := anthropic.NewCacheControlEphemeralParam()
+			cacheControl.TTL = m.InstructionsTTL
 			params.System[last].CacheControl = cacheControl
 		}
 		for _, tool := range req.Tools {

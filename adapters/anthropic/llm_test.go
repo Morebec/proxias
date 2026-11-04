@@ -723,3 +723,36 @@ func TestLLMCompleteStreaming(t *testing.T) {
 		})
 	}
 }
+
+func TestLLMCompleteCachesAndBounds(t *testing.T) {
+	var request map[string]any
+	client := mockClaude(t, http.StatusOK, `{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"Hi."}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, &request)
+	llm := anthropic.NewLLM(client, "m")
+	llm.Buffered = true
+	llm.MaxTokens = 16000
+	llm.InstructionsTTL = anthropicsdk.CacheControlEphemeralTTLTTL1h
+
+	for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
+		Messages: []proxias.LLMMessage{
+			{
+				Role: proxias.LLMMessageRoleSystem,
+				Parts: []proxias.LLMPart{
+					{Text: "Be brief."},
+				},
+			},
+			{
+				Role: proxias.LLMMessageRoleUser,
+				Parts: []proxias.LLMPart{
+					{Text: "Hi"},
+				},
+			},
+		},
+	}) {
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, float64(16000), request["max_tokens"])
+	assert.Equal(t, map[string]any{"type": "ephemeral"}, request["cache_control"], "the conversation is cached")
+	system := request["system"].([]any)[0].(map[string]any)
+	assert.Equal(t, map[string]any{"type": "ephemeral", "ttl": "1h"}, system["cache_control"], "the instructions are cached an hour")
+}
