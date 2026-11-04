@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -20,16 +20,16 @@ func main() {
 	// Delegation: asking rita is one of max's actions.
 	ritaSays := `Go 1.25 added sync.WaitGroup.Go, which starts a goroutine ` +
 		`and tracks it.` + agentdemo.Done
-	rita := agentsdk.Agent{
+	rita := proxias.Agent{
 		ID: "rita",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Rita",
 			Role: "researcher, answers in one sentence",
 		},
 	}
-	max := agentsdk.Agent{
+	max := proxias.Agent{
 		ID: "max",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Max",
 			Role: "team lead, delegates research",
 		},
@@ -44,19 +44,19 @@ func main() {
 			},
 		),
 	)
-	question := agentsdk.NewMessageEvent(
-		agentsdk.NewUserSource("john"),
+	question := proxias.NewMessageEvent(
+		proxias.NewUserSource("john"),
 		"What's new in sync.WaitGroup in Go 1.25? Ask Rita.",
 	)
 	agentdemo.Print(question)
-	asked := agentsdk.NewSession(question)
+	asked := proxias.NewSession(question)
 	stream, err := max.Loop(ctx, asked, agentdemo.Strategy(agentdemo.Script{
 		React: []string{
 			`<action>{"action_id": "ask_rita", "params": {"message": "What ` +
 				`did Go 1.25 add to sync.WaitGroup?"}}</action>`,
 			`Rita says Go 1.25 added WaitGroup.Go.` + agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			agentdemo.Requests("ask_rita", "message", "What did Go 1.25 add to sync.WaitGroup?"),
 		},
 		Syntheses: []string{`Rita says Go 1.25 added WaitGroup.Go.`},
@@ -74,16 +74,16 @@ func main() {
 
 	// Conversation: two agents reply to each other, four times in all.
 	fmt.Println()
-	olga := agentsdk.Agent{
+	olga := proxias.Agent{
 		ID: "olga",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Olga",
 			Role: "optimist, one sentence per reply",
 		},
 	}
-	sam := agentsdk.Agent{
+	sam := proxias.Agent{
 		ID: "sam",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Sam",
 			Role: "skeptic, one sentence per reply",
 		},
@@ -94,13 +94,13 @@ func main() {
 		`Then we measure first, and rewrite the hot path.` + agentdemo.Done,
 		`Agreed.` + agentdemo.Done,
 	}
-	opener := agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), "Should we rewrite the billing service in Go?")
+	opener := proxias.NewMessageEvent(proxias.NewUserSource("john"), "Should we rewrite the billing service in Go?")
 	agentdemo.Print(opener)
 	strategy := agentdemo.Strategy(agentdemo.Script{
 		React:     says,
 		Reasoning: says,
 	})
-	agents := []agentsdk.Agent{olga, sam}
+	agents := []proxias.Agent{olga, sam}
 	if err := converse(ctx, opener, 4, agents, strategy); err != nil {
 		log.Fatal(err)
 	}
@@ -112,14 +112,14 @@ func main() {
 // nothing.
 func converse(
 	ctx context.Context,
-	opener agentsdk.Event,
+	opener proxias.Event,
 	rounds int,
-	agents []agentsdk.Agent,
-	strategy agentsdk.CognitiveStrategy,
+	agents []proxias.Agent,
+	strategy proxias.CognitiveStrategy,
 ) error {
-	sessions := make([]agentsdk.Session, len(agents))
+	sessions := make([]proxias.Session, len(agents))
 	for i := range sessions {
-		sessions[i] = agentsdk.NewSession()
+		sessions[i] = proxias.NewSession()
 	}
 	said := opener
 	for round := range rounds {
@@ -138,7 +138,7 @@ func converse(
 		if reply == "" {
 			return nil
 		}
-		said = agentsdk.NewMessageEvent(agents[i].AsSource(), reply)
+		said = proxias.NewMessageEvent(agents[i].AsSource(), reply)
 		agentdemo.Print(said)
 	}
 	return nil

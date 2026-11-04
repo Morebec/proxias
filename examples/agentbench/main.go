@@ -32,8 +32,8 @@ import (
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 
-	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
+	"github.com/morebec/proxias"
+	agentanthropic "github.com/morebec/proxias/adapters/anthropic"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -128,7 +128,7 @@ type timing struct {
 	events     []string
 }
 
-func (t *timing) observe(e agentsdk.Event) {
+func (t *timing) observe(e proxias.Event) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if *verbose {
@@ -137,13 +137,13 @@ func (t *timing) observe(e agentsdk.Event) {
 
 	// The first event is the first action request, or the first reply, of an
 	// agent.
-	if t.firstEvent != 0 || !e.HasSourceType(agentsdk.EventSourceTypeAgent) {
+	if t.firstEvent != 0 || !e.HasSourceType(proxias.EventSourceTypeAgent) {
 		return
 	}
-	if e.Type == agentsdk.EventTypeActionRequest {
+	if e.Type == proxias.EventTypeActionRequest {
 		t.firstEvent = time.Since(t.began)
 	}
-	if e.Type == agentsdk.EventTypeMessage && len(e.Payload) > 0 {
+	if e.Type == proxias.EventTypeMessage && len(e.Payload) > 0 {
 		t.firstEvent = time.Since(t.began)
 	}
 }
@@ -192,7 +192,7 @@ func main() {
 	if *suite == "catalog" {
 		descs, _ := catalogActions(
 			&calls{},
-		).Descriptors(context.Background(), agentsdk.Session{})
+		).Descriptors(context.Background(), proxias.Session{})
 		data, _ := json.Marshal(descs)
 		fmt.Printf(
 			"catalog: %d actions, %d bytes of descriptors with their schemas "+

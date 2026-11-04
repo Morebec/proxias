@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 )
 
 // Ask is how the examples have an agent talk to another: an action of the app,
@@ -12,15 +12,15 @@ import (
 // message of the agent from, Looped with the strategy; its reply is the output
 // (Data "reply"). Each session of from keeps its own session with to, so to
 // remembers what it was asked.
-func Ask(from, to agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.ActionExecutor {
+func Ask(from, to proxias.Agent, strategy proxias.CognitiveStrategy) proxias.ActionExecutor {
 	var (
 		mutex    sync.Mutex
-		sessions = map[string]agentsdk.Session{}
+		sessions = map[string]proxias.Session{}
 	)
 	id := "ask_" + to.ID
-	return agentsdk.SimpleActionExecutor{
-		Actions: map[string]agentsdk.SimpleAction{id: {
-			ActionDescriptor: agentsdk.ActionDescriptor{
+	return proxias.SimpleActionExecutor{
+		Actions: map[string]proxias.SimpleAction{id: {
+			ActionDescriptor: proxias.ActionDescriptor{
 				ID:   id,
 				Name: id,
 				Description: "Asks " + to.Name + " (" + to.Role + ") " +
@@ -33,12 +33,12 @@ func Ask(from, to agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.
 			},
 			RunFn: func(
 				ctx context.Context,
-				s agentsdk.Session,
+				s proxias.Session,
 				params map[string]any,
-			) (agentsdk.ActionExecutionResult, error) {
+			) (proxias.ActionExecutionResult, error) {
 				message, _ := params["message"].(string)
 				if message == "" {
-					return agentsdk.ActionExecutionResult{
+					return proxias.ActionExecutionResult{
 						ActionID: id,
 						Status:   "failed",
 						Data: map[string]any{
@@ -50,19 +50,19 @@ func Ask(from, to agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.
 				defer mutex.Unlock()
 				asked, ok := sessions[s.ID()]
 				if !ok {
-					asked = agentsdk.NewSession()
+					asked = proxias.NewSession()
 				}
-				asked = asked.WithEvents(agentsdk.NewMessageEvent(from.AsSource(), message))
+				asked = asked.WithEvents(proxias.NewMessageEvent(from.AsSource(), message))
 				stream, err := to.Loop(ctx, asked, strategy)
 				if err != nil {
-					return agentsdk.ActionExecutionResult{}, err
+					return proxias.ActionExecutionResult{}, err
 				}
 				ended, err := stream.Collect()
 				sessions[s.ID()] = ended
 				if err != nil {
-					return agentsdk.ActionExecutionResult{}, err
+					return proxias.ActionExecutionResult{}, err
 				}
-				return agentsdk.ActionExecutionResult{
+				return proxias.ActionExecutionResult{
 					ActionID: id,
 					Status:   "completed",
 					Data: map[string]any{
@@ -77,10 +77,10 @@ func Ask(from, to agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.
 // Reply is what the events say to whoever reads them: the text of the last
 // message of an agent that
 // says something, "" for none.
-func Reply(events []agentsdk.Event) string {
+func Reply(events []proxias.Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
-		if !e.HasSourceType(agentsdk.EventSourceTypeAgent) || e.Type != agentsdk.EventTypeMessage {
+		if !e.HasSourceType(proxias.EventSourceTypeAgent) || e.Type != proxias.EventTypeMessage {
 			continue
 		}
 		if len(e.Payload) > 0 {

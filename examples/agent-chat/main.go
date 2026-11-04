@@ -25,11 +25,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/morebec/proxias/agentsdk"
-	"github.com/morebec/proxias/agentsdk/transports/agenthttp"
-	"github.com/morebec/proxias/agentsdk/transports/agentprotocolhttp"
-	"github.com/morebec/proxias/agentsdk/transports/openaihttp"
+	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
+	"github.com/morebec/proxias/transports/agenthttp"
+	"github.com/morebec/proxias/transports/agentprotocolhttp"
+	"github.com/morebec/proxias/transports/openaihttp"
 )
 
 var (
@@ -45,14 +45,14 @@ var (
 func main() {
 	flag.Parse()
 
-	ada := agentsdk.Agent{
+	ada := proxias.Agent{
 		ID: "ada",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Ada",
 			Role: "personal assistant",
 		},
 		ActionExecutor: agentdemo.Actions(agentdemo.Action{
-			ActionDescriptor: agentsdk.ActionDescriptor{
+			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "send_email",
 				Description: "Sends an email.",
 				InputSchema: agentdemo.Params("to", "the address", "body", "the text"),
@@ -61,7 +61,7 @@ func main() {
 				return fmt.Sprintf("sent to %v", params["to"]), nil
 			},
 		}),
-		Middleware: []agentsdk.AgentMiddleware{
+		Middleware: []proxias.AgentMiddleware{
 			withClock,
 		}, // an extension: every turn is told the time
 	}
@@ -73,7 +73,7 @@ func main() {
 			`Done: I emailed "Hello Boss!" to joe@boss.com.` + agentdemo.Done,
 			`You're welcome!` + agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			agentdemo.Requests("send_email", "to", "joe@boss.com", "body", "Hello Boss!"),
 		},
 		Syntheses: []string{`Done: I emailed "Hello Boss!" to joe@boss.com.`},
@@ -85,7 +85,7 @@ func main() {
 			"agenthttp": agenthttp.NewHandler(ada, strategy),
 			"openai": openaihttp.NewHandler(
 				strategy,
-				[]agentsdk.Agent{ada},
+				[]proxias.Agent{ada},
 			),
 			"agentprotocol": agentprotocolhttp.NewHandler(ada, strategy),
 		}
@@ -96,10 +96,10 @@ func main() {
 		log.Fatal(http.ListenAndServe(*serve, handler))
 	}
 
-	session := agentsdk.NewSession()
+	session := proxias.NewSession()
 	texts := []string{"Please email joe@boss.com: Hello Boss!", "Thanks!"}
 	for _, text := range texts {
-		message := agentsdk.NewMessageEvent(agentsdk.NewUserSource("john"), text)
+		message := proxias.NewMessageEvent(proxias.NewUserSource("john"), text)
 		agentdemo.Print(message)
 		stream, err := ada.Loop(context.Background(), session.WithEvents(message), strategy)
 		if err != nil {
@@ -119,12 +119,12 @@ func main() {
 
 // withClock tells the turn the time it is, as a system message of its session
 // for this turn only.
-func withClock(next agentsdk.CognitiveStrategy) agentsdk.CognitiveStrategy {
-	return agentsdk.StrategyFunc(
-		func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
+func withClock(next proxias.CognitiveStrategy) proxias.CognitiveStrategy {
+	return proxias.StrategyFunc(
+		func(ctx context.Context, inv proxias.Invocation) iter.Seq[proxias.StreamUpdate] {
 			inv.Session = inv.Session.WithEvents(
-				agentsdk.NewMessageEvent(
-					agentsdk.NewSystemSource("clock"),
+				proxias.NewMessageEvent(
+					proxias.NewSystemSource("clock"),
 					"It is "+time.Now().Format(time.RFC1123)+".",
 				),
 			)

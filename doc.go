@@ -1,15 +1,29 @@
-// Package proxias is a deterministic execution plane for LLM applications. Seen as a UI, human prose is turned
-// into commands or queries before an LLM sees it, and their results are turned back into prose.
+// Package proxias is an SDK of agents that live through events rather than
+// chat messages.
 //
-// The ControlPlane is the entry point. An action is whatever an ActionExecutionEngine runs for a request: a
-// plain function as much as a workflow, a process or a pipeline. An IntentClassifier, ideally a fast System-1
-// component, names which of the engine's actions a request asks for and with which parameters (a
-// CompositeIntentClassifier splits it into a selector and a parameter extractor). The
-// ActionExecutionEngine runs them, and an ActionExecutionSynthesizer turns their results back into a
-// response, usually in a single LLM pass. A request that asks for no action is answered by the ReasoningEngine,
-// usually an LLM, as is.
+// An Event is an entry of an agent's experience: a message from a person,
+// another agent or a system (an instruction is a message from a system source),
+// a thought, an action it requests, the result of one, anything the app appends
+// for it. A Session is the trace of those events, kept by the app, like the
+// conversation of a chat completions API. An Agent is who it is, its execution
+// layer (ActionExecutor) and the AgentMiddleware that wraps every turn it
+// takes.
 //
-// Proxias is a library: transports (gRPC, CLI...) and every application concern live in the host. The
-// model of Proxias is the OpenAI chat completions API, which NewChatCompletionHandler serves over net/http, and
-// the anthropic package implements the components with Claude.
+// How an agent thinks is a CognitiveStrategy, one turn at a time:
+// NewReActStrategy (one model call, every action a tool), NewGatedStrategy (an
+// ActionClassifier, an LLMActionClassifier in one call or a
+// CompositeActionClassifier of an ActionSelector and an
+// ActionParameterExtractor, finds the executions, the agent runs them, one
+// synthesis), or the app's own. Each prompt is a field of what uses it, its
+// default an exported constant (DefaultReActPrompt...). Strategies are
+// vendor-neutral over two model interfaces: LLM, and System1Model (a System One
+// model: questions about
+// a state, answered with probabilities), which adapters implement.
+//
+// Agent.Invoke takes one turn, Agent.Loop takes turns until one completes,
+// executing the actions requested between them, and Agent.Watch Loops on each
+// event of a channel. Each returns a SessionStream (whole events, and chunks of
+// text as it is written); SessionStream.Collect reads it to its end. How agents
+// talk to each other is the app's: an
+// action of its own that invokes another agent.
 package proxias

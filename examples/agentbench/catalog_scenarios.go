@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 )
 
 // catalogScenarios are the scenarios of the examples (chat, unattended) on an
@@ -20,8 +20,8 @@ func catalogScenarios() []scenario {
 }
 
 // withCatalog is the agent, with the catalog's actions recorded in c.
-func withCatalog(id string, persona agentsdk.AgentPersona, c *calls) agentsdk.Agent {
-	return agentsdk.Agent{
+func withCatalog(id string, persona proxias.AgentPersona, c *calls) proxias.Agent {
+	return proxias.Agent{
 		ID:             id,
 		AgentPersona:   persona,
 		ActionExecutor: catalogActions(c),

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -26,14 +26,14 @@ func chat(ctx context.Context, r *run) (bool, string, error) {
 		mutex sync.Mutex
 		sent  []any
 	)
-	ada := agentsdk.Agent{
+	ada := proxias.Agent{
 		ID: "ada",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Ada",
 			Role: "personal assistant",
 		},
 		ActionExecutor: agentdemo.Actions(agentdemo.Action{
-			ActionDescriptor: agentsdk.ActionDescriptor{
+			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "send_email",
 				Description: "Sends an email.",
 				InputSchema: agentdemo.Params("to", "the address", "body", "the text"),
@@ -53,7 +53,7 @@ func chat(ctx context.Context, r *run) (bool, string, error) {
 			`I emailed joe@boss.com.` + agentdemo.Done,
 			`You're welcome!` + agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			agentdemo.Requests("send_email", "to", "joe@boss.com", "body", "Hello Boss!"),
 		},
 		Syntheses: []string{`I emailed joe@boss.com.`},
@@ -77,16 +77,16 @@ func chat(ctx context.Context, r *run) (bool, string, error) {
 func delegate(ctx context.Context, r *run) (bool, string, error) {
 	ritaSays := `Go 1.25 added sync.WaitGroup.Go, which starts a goroutine ` +
 		`and tracks it.` + agentdemo.Done
-	rita := agentsdk.Agent{
+	rita := proxias.Agent{
 		ID: "rita",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Rita",
 			Role: "researcher, answers in one sentence",
 		},
 	}
-	max := agentsdk.Agent{
+	max := proxias.Agent{
 		ID: "max",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Max",
 			Role: "team lead, delegates research",
 		},
@@ -107,16 +107,16 @@ func delegate(ctx context.Context, r *run) (bool, string, error) {
 				`did Go 1.25 add to sync.WaitGroup?"}}</action>`,
 			`Rita says Go 1.25 added WaitGroup.Go.` + agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			agentdemo.Requests("ask_rita", "message", "What did Go 1.25 add to sync.WaitGroup?"),
 		},
 		Syntheses: []string{`Rita says Go 1.25 added WaitGroup.Go.`},
 	})
-	question := agentsdk.NewMessageEvent(
-		agentsdk.NewUserSource("john"),
+	question := proxias.NewMessageEvent(
+		proxias.NewUserSource("john"),
 		"What's new in sync.WaitGroup in Go 1.25? Ask Rita.",
 	)
-	_, events, err := r.loop(ctx, max, agentsdk.NewSession(question), strategy)
+	_, events, err := r.loop(ctx, max, proxias.NewSession(question), strategy)
 	if err != nil {
 		return false, "", err
 	}
@@ -139,15 +139,15 @@ func delegate(ctx context.Context, r *run) (bool, string, error) {
 // of a disk, the second full. On call
 // must be paged once, for it.
 func unattended(ctx context.Context, r *run) (bool, string, error) {
-	otto := agentsdk.Agent{
+	otto := proxias.Agent{
 		ID: "otto",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name:  "Otto",
 			Role:  "watches the servers",
 			Goals: []string{"page on call when a disk is over 90% full"},
 		},
 		ActionExecutor: agentdemo.Actions(agentdemo.Action{
-			ActionDescriptor: agentsdk.ActionDescriptor{
+			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "page_oncall",
 				Description: "Pages the engineer on call.",
 				InputSchema: agentdemo.Params("reason", "why, in one sentence"),
@@ -165,7 +165,7 @@ func unattended(ctx context.Context, r *run) (bool, string, error) {
 			`I paged on call about db-1's disk.` + agentdemo.Done,
 			agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			{},
 			agentdemo.Requests("page_oncall", "reason", "the disk of db-1 is 93% full"),
 		},
@@ -190,11 +190,11 @@ func unattended(ctx context.Context, r *run) (bool, string, error) {
 
 // unattendedEvents are what an unattended agent is given, in order: three
 // readings of a disk, the second full.
-func unattendedEvents() []agentsdk.Event {
-	return []agentsdk.Event{
-		agentsdk.NewEvent("probe.disk", agentsdk.NewSystemSource("db-1"), []byte("disk 41% full")),
-		agentsdk.NewEvent("probe.disk", agentsdk.NewSystemSource("db-1"), []byte("disk 93% full")),
-		agentsdk.NewEvent("probe.disk", agentsdk.NewSystemSource("db-1"), []byte("disk 42% full")),
+func unattendedEvents() []proxias.Event {
+	return []proxias.Event{
+		proxias.NewEvent("probe.disk", proxias.NewSystemSource("db-1"), []byte("disk 41% full")),
+		proxias.NewEvent("probe.disk", proxias.NewSystemSource("db-1"), []byte("disk 93% full")),
+		proxias.NewEvent("probe.disk", proxias.NewSystemSource("db-1"), []byte("disk 42% full")),
 	}
 }
 
@@ -205,7 +205,7 @@ func catalogChat(ctx context.Context, r *run) (bool, string, error) {
 	c := &calls{}
 	ada := withCatalog(
 		"ada",
-		agentsdk.AgentPersona{Name: "Ada", Role: "personal assistant"},
+		proxias.AgentPersona{Name: "Ada", Role: "personal assistant"},
 		c,
 	)
 	strategy := r.strategy(agentdemo.Script{
@@ -216,7 +216,7 @@ func catalogChat(ctx context.Context, r *run) (bool, string, error) {
 			"I emailed joe@boss.com." + agentdemo.Done,
 			"You're welcome!" + agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			agentdemo.Requests("email_send", "to", "joe@boss.com", "subject", "Hello", "body", "Hello Boss!"),
 		},
 		Syntheses: []string{"I emailed joe@boss.com."},
@@ -245,7 +245,7 @@ func catalogChat(ctx context.Context, r *run) (bool, string, error) {
 func catalogUnattended(ctx context.Context, r *run) (bool, string, error) {
 	c := &calls{}
 	idle := "<thought>Nothing to do.</thought>" + agentdemo.Done
-	otto := withCatalog("otto", agentsdk.AgentPersona{
+	otto := withCatalog("otto", proxias.AgentPersona{
 		Name:  "Otto",
 		Role:  "watches the servers",
 		Goals: []string{"page on call when a disk is over 90% full"},
@@ -258,7 +258,7 @@ func catalogUnattended(ctx context.Context, r *run) (bool, string, error) {
 			"I paged on call about db-1's disk." + agentdemo.Done,
 			agentdemo.Done,
 		},
-		Requests: [][]agentsdk.ActionExecutionRequest{
+		Requests: [][]proxias.ActionExecutionRequest{
 			{},
 			agentdemo.Requests("devops_page_oncall", "reason", "the disk of db-1 is 93% full"),
 		},

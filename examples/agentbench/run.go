@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -21,18 +21,18 @@ type run struct {
 }
 
 // strategy is the strategy of the run, on the script or on Claude.
-func (r *run) strategy(script agentdemo.Script) agentsdk.CognitiveStrategy {
+func (r *run) strategy(script agentdemo.Script) proxias.CognitiveStrategy {
 	return timedStages(r.env.StrategyOf(r.kind, r.onClaude, script), r.t)
 }
 
 // timed is the agent with its turns timed (a middleware of the bench), and its
 // executions when its strategy is gated.
-func (r *run) timed(a agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agentsdk.Agent {
+func (r *run) timed(a proxias.Agent, strategy proxias.CognitiveStrategy) proxias.Agent {
 	a = timedExecution(a, strategy, r.t)
-	timer := func(next agentsdk.CognitiveStrategy) agentsdk.CognitiveStrategy {
-		return agentsdk.StrategyFunc(
-			func(ctx context.Context, inv agentsdk.Invocation) iter.Seq[agentsdk.StreamUpdate] {
-				return func(yield func(agentsdk.StreamUpdate) bool) {
+	timer := func(next proxias.CognitiveStrategy) proxias.CognitiveStrategy {
+		return proxias.StrategyFunc(
+			func(ctx context.Context, inv proxias.Invocation) iter.Seq[proxias.StreamUpdate] {
+				return func(yield func(proxias.StreamUpdate) bool) {
 					began := time.Now()
 					defer func() { r.t.cognition(time.Since(began)) }()
 					for u := range next.Invoke(ctx, inv) {
@@ -50,9 +50,9 @@ func (r *run) timed(a agentsdk.Agent, strategy agentsdk.CognitiveStrategy) agent
 
 // observe observes the stream to its end, and returns the last session, the
 // events added, and its error.
-func (r *run) observe(stream *agentsdk.SessionStream) (agentsdk.Session, []agentsdk.Event, error) {
+func (r *run) observe(stream *proxias.SessionStream) (proxias.Session, []proxias.Event, error) {
 	var (
-		events []agentsdk.Event
+		events []proxias.Event
 		first  error
 	)
 	for d := range stream.Updates() {
@@ -70,10 +70,10 @@ func (r *run) observe(stream *agentsdk.SessionStream) (agentsdk.Session, []agent
 // loop has the agent Loop on the session.
 func (r *run) loop(
 	ctx context.Context,
-	a agentsdk.Agent,
-	s agentsdk.Session,
-	strategy agentsdk.CognitiveStrategy,
-) (agentsdk.Session, []agentsdk.Event, error) {
+	a proxias.Agent,
+	s proxias.Session,
+	strategy proxias.CognitiveStrategy,
+) (proxias.Session, []proxias.Event, error) {
 	timed := r.timed(a, strategy)
 	stream, err := timed.Loop(ctx, s, strategy)
 	if err != nil {
@@ -86,19 +86,19 @@ func (r *run) loop(
 // returns the reply to the last.
 func (r *run) chat(
 	ctx context.Context,
-	a agentsdk.Agent,
-	strategy agentsdk.CognitiveStrategy,
+	a proxias.Agent,
+	strategy proxias.CognitiveStrategy,
 	texts ...string,
 ) (string, error) {
-	s := agentsdk.NewSession()
+	s := proxias.NewSession()
 	var reply string
 	for _, text := range texts {
 		var (
-			events []agentsdk.Event
+			events []proxias.Event
 			err    error
 		)
-		john := agentsdk.NewUserSource("john")
-		s = s.WithEvents(agentsdk.NewMessageEvent(john, text))
+		john := proxias.NewUserSource("john")
+		s = s.WithEvents(proxias.NewMessageEvent(john, text))
 		if s, events, err = r.loop(ctx, a, s, strategy); err != nil {
 			return "", err
 		}
@@ -111,17 +111,17 @@ func (r *run) chat(
 // the events of the session.
 func (r *run) watch(
 	ctx context.Context,
-	a agentsdk.Agent,
-	strategy agentsdk.CognitiveStrategy,
-	events ...agentsdk.Event,
-) ([]agentsdk.Event, error) {
-	incoming := make(chan agentsdk.Event, len(events))
+	a proxias.Agent,
+	strategy proxias.CognitiveStrategy,
+	events ...proxias.Event,
+) ([]proxias.Event, error) {
+	incoming := make(chan proxias.Event, len(events))
 	for _, e := range events {
 		incoming <- e
 	}
 	close(incoming)
 	timed := r.timed(a, strategy)
-	stream, err := timed.Watch(ctx, agentsdk.NewSession(), incoming, strategy)
+	stream, err := timed.Watch(ctx, proxias.NewSession(), incoming, strategy)
 	if err != nil {
 		return nil, err
 	}
@@ -130,13 +130,13 @@ func (r *run) watch(
 }
 
 // results are the results of the action in the events.
-func results(events []agentsdk.Event, action string) []agentsdk.ActionExecutionResult {
-	var found []agentsdk.ActionExecutionResult
+func results(events []proxias.Event, action string) []proxias.ActionExecutionResult {
+	var found []proxias.ActionExecutionResult
 	for _, e := range events {
-		if e.Type != agentsdk.EventTypeActionResult {
+		if e.Type != proxias.EventTypeActionResult {
 			continue
 		}
-		var result agentsdk.ActionExecutionResult
+		var result proxias.ActionExecutionResult
 		err := json.Unmarshal(e.Payload, &result)
 		if err == nil && result.ActionID == action {
 			found = append(found, result)
@@ -147,8 +147,8 @@ func results(events []agentsdk.Event, action string) []agentsdk.ActionExecutionR
 
 // resultsAt tells, for each result of the action in the session, the index of
 // the given event it followed.
-func resultsAt(session []agentsdk.Event, given []agentsdk.Event, action string) []int {
-	index := map[agentsdk.EventID]int{}
+func resultsAt(session []proxias.Event, given []proxias.Event, action string) []int {
+	index := map[proxias.EventID]int{}
 	for i, e := range given {
 		index[e.ID] = i
 	}
@@ -158,7 +158,7 @@ func resultsAt(session []agentsdk.Event, given []agentsdk.Event, action string) 
 		if i, ok := index[e.ID]; ok {
 			last = i
 		}
-		if len(results([]agentsdk.Event{e}, action)) > 0 {
+		if len(results([]proxias.Event{e}, action)) > 0 {
 			at = append(at, last)
 		}
 	}

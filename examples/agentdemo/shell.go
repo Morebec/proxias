@@ -15,9 +15,9 @@ import (
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"github.com/morebec/proxias/agentsdk"
-	"github.com/morebec/proxias/agentsdk/adapters"
-	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
+	"github.com/morebec/proxias"
+	"github.com/morebec/proxias/adapters"
+	agentanthropic "github.com/morebec/proxias/adapters/anthropic"
 )
 
 // The strategies an example runs on (-strategy).
@@ -26,14 +26,14 @@ const (
 	// a tool with its JSON Schema.
 	StrategyReAct = "react"
 	// StrategyGated is the gated strategy, its classifier Claude in a single
-	// call (agentsdk.LLMActionClassifier).
+	// call (proxias.LLMActionClassifier).
 	StrategyGated = "gated"
 	// StrategyGatedComposite is the gated strategy, its classifier Claude
 	// selecting the actions, then extracting their parameters
-	// (agentsdk.LLMActionSelector, agentsdk.LLMActionParameterExtractor).
+	// (proxias.LLMActionSelector, proxias.LLMActionParameterExtractor).
 	StrategyGatedComposite = "gated-composite"
 	// StrategyGatedSplit is the gated strategy, its selector Claude answering
-	// as a System One model (agentsdk.System1ActionSelector of
+	// as a System One model (proxias.System1ActionSelector of
 	// adapters.LLMSystem1), its extractor Claude.
 	StrategyGatedSplit = "gated-split"
 )
@@ -74,21 +74,21 @@ var Counter agentanthropic.UsageCounter
 // what its reasoning, the ReAct strategy, answers.
 type Script struct {
 	React     []string
-	Requests  [][]agentsdk.ActionExecutionRequest
+	Requests  [][]proxias.ActionExecutionRequest
 	Syntheses []string
 	Reasoning []string
 }
 
 // Strategy is the strategy of an agent, of the kind of -strategy, on Claude
 // with -claude, otherwise on the script.
-func Strategy(script Script) agentsdk.CognitiveStrategy {
+func Strategy(script Script) proxias.CognitiveStrategy {
 	parse()
 	return StrategyOf(*strategyKind, *claude, script)
 }
 
 // StrategyOf is the strategy of an agent of the kind, on Claude or on the
 // script, counted by Counter.
-func StrategyOf(kind string, onClaude bool, script Script) agentsdk.CognitiveStrategy {
+func StrategyOf(kind string, onClaude bool, script Script) proxias.CognitiveStrategy {
 	return Env{
 		Counter:    &Counter,
 		MaxRetries: -1,
@@ -101,21 +101,21 @@ func StrategyOf(kind string, onClaude bool, script Script) agentsdk.CognitiveStr
 
 // StrategyOf is the strategy of an agent of the kind, on Claude or on the
 // script, in the env.
-func (env Env) StrategyOf(kind string, onClaude bool, script Script) agentsdk.CognitiveStrategy {
+func (env Env) StrategyOf(kind string, onClaude bool, script Script) proxias.CognitiveStrategy {
 	parse()
 	if alias, ok := aliases[kind]; ok {
 		kind = alias
 	}
 	switch kind {
 	case StrategyReAct:
-		return agentsdk.NewReActStrategy(env.llm(onClaude, script.React))
+		return proxias.NewReActStrategy(env.llm(onClaude, script.React))
 	case StrategyGated:
 		if onClaude {
 			claude := env.llm(true, nil)
-			return agentsdk.NewGatedStrategy(
-				agentsdk.LLMActionClassifier{LLM: claude},
+			return proxias.NewGatedStrategy(
+				proxias.LLMActionClassifier{LLM: claude},
 				claude,
-				agentsdk.NewReActStrategy(claude),
+				proxias.NewReActStrategy(claude),
 			)
 		}
 		// On the script, Claude classifies each turn's requests, then says its
@@ -137,19 +137,19 @@ func (env Env) StrategyOf(kind string, onClaude bool, script Script) agentsdk.Co
 			claude = append(claude, `{"executions":[]}`+Done)
 		}
 		scripted := scriptedLLM(claude)
-		return agentsdk.NewGatedStrategy(
-			agentsdk.LLMActionClassifier{LLM: scripted},
+		return proxias.NewGatedStrategy(
+			proxias.LLMActionClassifier{LLM: scripted},
 			scripted,
-			agentsdk.NewReActStrategy(scriptedLLM(script.Reasoning)),
+			proxias.NewReActStrategy(scriptedLLM(script.Reasoning)),
 		)
 	case StrategyGatedComposite:
 		if onClaude {
 			claude := env.llm(true, nil)
-			classifier := agentsdk.NewCompositeActionClassifier(
-				agentsdk.LLMActionSelector{LLM: claude},
-				agentsdk.LLMActionParameterExtractor{LLM: claude},
+			classifier := proxias.NewCompositeActionClassifier(
+				proxias.LLMActionSelector{LLM: claude},
+				proxias.LLMActionParameterExtractor{LLM: claude},
 			)
-			return agentsdk.NewGatedStrategy(classifier, claude, agentsdk.NewReActStrategy(claude))
+			return proxias.NewGatedStrategy(classifier, claude, proxias.NewReActStrategy(claude))
 		}
 		// On the script, Claude selects the actions of each turn's requests,
 		// extracts their executions, then says its synthesis once they ran;
@@ -181,25 +181,25 @@ func (env Env) StrategyOf(kind string, onClaude bool, script Script) agentsdk.Co
 			claude = append(claude, `{"actions":[]}`+Done)
 		}
 		scripted := scriptedLLM(claude)
-		classifier := agentsdk.NewCompositeActionClassifier(
-			agentsdk.LLMActionSelector{LLM: scripted},
-			agentsdk.LLMActionParameterExtractor{LLM: scripted},
+		classifier := proxias.NewCompositeActionClassifier(
+			proxias.LLMActionSelector{LLM: scripted},
+			proxias.LLMActionParameterExtractor{LLM: scripted},
 		)
-		return agentsdk.NewGatedStrategy(
+		return proxias.NewGatedStrategy(
 			classifier,
 			scripted,
-			agentsdk.NewReActStrategy(scriptedLLM(script.Reasoning)),
+			proxias.NewReActStrategy(scriptedLLM(script.Reasoning)),
 		)
 	case StrategyGatedSplit:
 		if onClaude {
 			claude := env.llm(true, nil)
-			classifier := agentsdk.NewCompositeActionClassifier(
-				agentsdk.System1ActionSelector{
+			classifier := proxias.NewCompositeActionClassifier(
+				proxias.System1ActionSelector{
 					System1: adapters.LLMSystem1{LLM: claude},
 				},
-				agentsdk.LLMActionParameterExtractor{LLM: claude},
+				proxias.LLMActionParameterExtractor{LLM: claude},
 			)
-			return agentsdk.NewGatedStrategy(classifier, claude, agentsdk.NewReActStrategy(claude))
+			return proxias.NewGatedStrategy(classifier, claude, proxias.NewReActStrategy(claude))
 		}
 		// On the script, System1 answers the questions of each turn's requests,
 		// then that nothing is asked for: an answer for both the choice and the
@@ -236,16 +236,16 @@ func (env Env) StrategyOf(kind string, onClaude bool, script Script) agentsdk.Co
 			)
 		}
 		scripted := scriptedLLM(claude)
-		classifier := agentsdk.NewCompositeActionClassifier(
-			agentsdk.System1ActionSelector{
+		classifier := proxias.NewCompositeActionClassifier(
+			proxias.System1ActionSelector{
 				System1: adapters.LLMSystem1{LLM: scriptedLLM(system1)},
 			},
-			agentsdk.LLMActionParameterExtractor{LLM: scripted},
+			proxias.LLMActionParameterExtractor{LLM: scripted},
 		)
-		return agentsdk.NewGatedStrategy(
+		return proxias.NewGatedStrategy(
 			classifier,
 			scripted,
-			agentsdk.NewReActStrategy(scriptedLLM(script.Reasoning)),
+			proxias.NewReActStrategy(scriptedLLM(script.Reasoning)),
 		)
 	default:
 		log.Fatalf("-strategy %q: it is one of %s", kind, strings.Join(Strategies, ", "))
@@ -280,7 +280,7 @@ func (env Env) Client() anthropicsdk.Client {
 }
 
 // llm is Claude, or a model that answers the script.
-func (env Env) llm(onClaude bool, script []string) agentsdk.LLM {
+func (env Env) llm(onClaude bool, script []string) proxias.LLM {
 	if onClaude {
 		return agentanthropic.NewLLM(env.Client(), ClaudeModel)
 	}
@@ -290,7 +290,7 @@ func (env Env) llm(onClaude bool, script []string) agentsdk.LLM {
 // scriptedLLM answers each call with the next of the answers, written in the
 // markers of parseAnswer: thoughts and a final answer as text, actions as tool
 // calls; then with nothing. It is Claude, served the answers by a local server.
-func scriptedLLM(answers []string) agentsdk.LLM {
+func scriptedLLM(answers []string) proxias.LLM {
 	var (
 		mutex sync.Mutex
 		next  int
@@ -308,7 +308,7 @@ func scriptedLLM(answers []string) agentsdk.LLM {
 			content := []map[string]any{}
 			stopReason := "end_turn"
 			for i, e := range parseAnswer(answer) {
-				if e.Type != agentsdk.EventTypeActionRequest {
+				if e.Type != proxias.EventTypeActionRequest {
 					if e.Text() != "" {
 						content = append(
 							content,
@@ -317,7 +317,7 @@ func scriptedLLM(answers []string) agentsdk.LLM {
 					}
 					continue
 				}
-				var request agentsdk.ActionExecutionRequest
+				var request proxias.ActionExecutionRequest
 				if err := json.Unmarshal(e.Payload, &request); err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -356,12 +356,12 @@ func scriptedLLM(answers []string) agentsdk.LLM {
 
 // Requests are the requests of a turn: one, of the action, its parameters as
 // pairs of name and value.
-func Requests(actionID string, params ...any) []agentsdk.ActionExecutionRequest {
+func Requests(actionID string, params ...any) []proxias.ActionExecutionRequest {
 	p := map[string]any{}
 	for i := 0; i+1 < len(params); i += 2 {
 		p[fmt.Sprint(params[i])] = params[i+1]
 	}
-	return []agentsdk.ActionExecutionRequest{
+	return []proxias.ActionExecutionRequest{
 		{ActionID: actionID, Params: p},
 	}
 }
@@ -369,31 +369,31 @@ func Requests(actionID string, params ...any) []agentsdk.ActionExecutionRequest 
 // Actions is an executor of the actions, by their ID: each runs a function of
 // its parameters, whose output is the
 // data of its result ({"output": ...}), or whose error fails it.
-func Actions(actions ...Action) agentsdk.ActionExecutor {
-	executor := agentsdk.SimpleActionExecutor{
-		Actions: map[string]agentsdk.SimpleAction{},
+func Actions(actions ...Action) proxias.ActionExecutor {
+	executor := proxias.SimpleActionExecutor{
+		Actions: map[string]proxias.SimpleAction{},
 	}
 	for _, action := range actions {
 		run := action.Run
-		executor.Actions[action.ID] = agentsdk.SimpleAction{
+		executor.Actions[action.ID] = proxias.SimpleAction{
 			ActionDescriptor: action.ActionDescriptor,
 			RunFn: func(
 				ctx context.Context,
-				_ agentsdk.Session,
+				_ proxias.Session,
 				params map[string]any,
-			) (agentsdk.ActionExecutionResult, error) {
+			) (proxias.ActionExecutionResult, error) {
 				output, err := run(ctx, params)
 				if err != nil {
 					// A failure the agent is told of, not an error of the
 					// executor.
 					//nolint:nilerr // its result says why
-					return agentsdk.ActionExecutionResult{
+					return proxias.ActionExecutionResult{
 						ActionID: action.ID,
 						Status:   "failed",
 						Data:     map[string]any{"error": err.Error()},
 					}, nil
 				}
-				return agentsdk.ActionExecutionResult{
+				return proxias.ActionExecutionResult{
 					ActionID: action.ID,
 					Status:   "completed",
 					Data:     map[string]any{"output": output},
@@ -406,7 +406,7 @@ func Actions(actions ...Action) agentsdk.ActionExecutor {
 
 // Action is an action of Actions.
 type Action struct {
-	agentsdk.ActionDescriptor
+	proxias.ActionDescriptor
 	Run func(ctx context.Context, params map[string]any) (any, error)
 }
 

@@ -44,9 +44,9 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	openaisdk "github.com/openai/openai-go/v3"
 
-	"github.com/morebec/proxias/agentsdk"
-	agentanthropic "github.com/morebec/proxias/agentsdk/adapters/anthropic"
-	agentopenai "github.com/morebec/proxias/agentsdk/adapters/openai"
+	"github.com/morebec/proxias"
+	agentanthropic "github.com/morebec/proxias/adapters/anthropic"
+	agentopenai "github.com/morebec/proxias/adapters/openai"
 	"github.com/morebec/proxias/examples/agentdemo"
 )
 
@@ -84,9 +84,9 @@ func main() {
 		}
 		return filepath.Join(dir, p)
 	}
-	agent := &agentsdk.Agent{
+	agent := &proxias.Agent{
 		ID: "cleo",
-		AgentPersona: agentsdk.AgentPersona{
+		AgentPersona: proxias.AgentPersona{
 			Name: "Cleo",
 			Role: "personal assistant in a terminal, brief and friendly",
 			Goals: []string{
@@ -94,20 +94,20 @@ func main() {
 				"give yourself the capabilities you lack",
 			},
 		},
-		Memory: agentsdk.MarkdownMemory{Path: filepath.Join(dir, "MEMORY.md")},
-		ActionExecutor: agentsdk.SimpleActionExecutor{
-			Actions: map[string]agentsdk.SimpleAction{
+		Memory: proxias.MarkdownMemory{Path: filepath.Join(dir, "MEMORY.md")},
+		ActionExecutor: proxias.SimpleActionExecutor{
+			Actions: map[string]proxias.SimpleAction{
 				"get_current_time": {
-					ActionDescriptor: agentsdk.ActionDescriptor{
+					ActionDescriptor: proxias.ActionDescriptor{
 						ID:          "get_current_time",
 						Description: "Tells the current date and time.",
 					},
 					RunFn: func(
 						context.Context,
-						agentsdk.Session,
+						proxias.Session,
 						map[string]any,
-					) (agentsdk.ActionExecutionResult, error) {
-						return agentsdk.ActionExecutionResult{
+					) (proxias.ActionExecutionResult, error) {
+						return proxias.ActionExecutionResult{
 							ActionID: "get_current_time",
 							Status:   "completed",
 							Data: map[string]any{
@@ -117,7 +117,7 @@ func main() {
 					},
 				},
 				"read_file": {
-					ActionDescriptor: agentsdk.ActionDescriptor{
+					ActionDescriptor: proxias.ActionDescriptor{
 						ID: "read_file",
 						Description: "Reads a file of the workspace (a path " +
 							"relative to it, or absolute).",
@@ -125,19 +125,19 @@ func main() {
 					},
 					RunFn: func(
 						_ context.Context,
-						_ agentsdk.Session,
+						_ proxias.Session,
 						params map[string]any,
-					) (agentsdk.ActionExecutionResult, error) {
+					) (proxias.ActionExecutionResult, error) {
 						content, err := os.ReadFile(path(params))
 						if err != nil {
 							//nolint:nilerr // its result says why
-							return agentsdk.ActionExecutionResult{
+							return proxias.ActionExecutionResult{
 								ActionID: "read_file",
 								Status:   "failed",
 								Data:     map[string]any{"error": err.Error()},
 							}, nil
 						}
-						return agentsdk.ActionExecutionResult{
+						return proxias.ActionExecutionResult{
 							ActionID: "read_file",
 							Status:   "completed",
 							Data: map[string]any{
@@ -147,7 +147,7 @@ func main() {
 					},
 				},
 				"write_file": {
-					ActionDescriptor: agentsdk.ActionDescriptor{
+					ActionDescriptor: proxias.ActionDescriptor{
 						ID: "write_file",
 						Description: "Writes a file of the workspace, " +
 							"creating it and its directories, or replacing " +
@@ -161,9 +161,9 @@ func main() {
 					},
 					RunFn: func(
 						_ context.Context,
-						_ agentsdk.Session,
+						_ proxias.Session,
 						params map[string]any,
-					) (agentsdk.ActionExecutionResult, error) {
+					) (proxias.ActionExecutionResult, error) {
 						file := path(params)
 						err := os.MkdirAll(filepath.Dir(file), 0o750)
 						if err == nil {
@@ -171,13 +171,13 @@ func main() {
 						}
 						if err != nil {
 							//nolint:nilerr // its result says why
-							return agentsdk.ActionExecutionResult{
+							return proxias.ActionExecutionResult{
 								ActionID: "write_file",
 								Status:   "failed",
 								Data:     map[string]any{"error": err.Error()},
 							}, nil
 						}
-						return agentsdk.ActionExecutionResult{
+						return proxias.ActionExecutionResult{
 							ActionID: "write_file",
 							Status:   "completed",
 							Data:     map[string]any{"path": file},
@@ -185,7 +185,7 @@ func main() {
 					},
 				},
 				"execute_bash": {
-					ActionDescriptor: agentsdk.ActionDescriptor{
+					ActionDescriptor: proxias.ActionDescriptor{
 						ID: "execute_bash",
 						Description: "Runs a bash command in the workspace, " +
 							"for up to 60 seconds, and tells its output and " +
@@ -194,9 +194,9 @@ func main() {
 					},
 					RunFn: func(
 						ctx context.Context,
-						_ agentsdk.Session,
+						_ proxias.Session,
 						params map[string]any,
-					) (agentsdk.ActionExecutionResult, error) {
+					) (proxias.ActionExecutionResult, error) {
 						ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 						defer cancel()
 						var stdout, stderr strings.Builder
@@ -213,7 +213,7 @@ func main() {
 								stderr.WriteString("\n(timed out after 60s)")
 							}
 						}
-						return agentsdk.ActionExecutionResult{
+						return proxias.ActionExecutionResult{
 							ActionID: "execute_bash",
 							Status:   status,
 							Data: map[string]any{
@@ -227,7 +227,7 @@ func main() {
 			},
 		},
 	}
-	var llm agentsdk.LLM
+	var llm proxias.LLM
 	switch *vendor {
 	case "anthropic":
 		if *model == "" {
@@ -254,15 +254,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "-vendor %q: it is anthropic or openai\n", *vendor)
 		os.Exit(2)
 	}
-	strategy := agentsdk.NewReActStrategy(llm)
+	strategy := proxias.NewReActStrategy(llm)
 
 	fmt.Println(
 		"Talking to Cleo (" + *vendor + ", " + *model + ", in " + dir + "). " +
 			"exit quits, Ctrl-C cancels a turn.",
 	)
-	session := agentsdk.NewSession(
-		agentsdk.NewMessageEvent(
-			agentsdk.NewSystemSource("cli"),
+	session := proxias.NewSession(
+		proxias.NewMessageEvent(
+			proxias.NewSystemSource("cli"),
 			"You can read and write files, and run bash commands, in your "+
 				"workspace ("+dir+"). When you lack a capability, write "+
 				"yourself a script that gives it to you, run it, and reuse "+
@@ -290,7 +290,7 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		stream, err := agent.Loop(
 			ctx,
-			session.WithEvents(agentsdk.NewMessageEvent(agentsdk.NewUserSource("you"), text)),
+			session.WithEvents(proxias.NewMessageEvent(proxias.NewUserSource("you"), text)),
 			strategy,
 		)
 		if err != nil {
@@ -307,18 +307,18 @@ func main() {
 			}
 			for _, e := range update.Events {
 				switch {
-				case e.Type == agentsdk.EventTypeThought:
+				case e.Type == proxias.EventTypeThought:
 					// The model's thinking is kept whole, as JSON: its text is
 					// what to show.
 					thought := e.Text()
-					var thinking agentsdk.LLMChunk
+					var thinking proxias.LLMChunk
 					if json.Unmarshal(e.Payload, &thinking) == nil && thinking.Thinking != "" {
 						thought = thinking.Thinking
 					}
 					if thought = strings.TrimSpace(thought); thought != "" {
 						fmt.Printf("\033[2;3mthinking: %s\033[0m\n", thought)
 					}
-				case e.Type == agentsdk.EventTypeActionRequest || e.Type == agentsdk.EventTypeActionResult:
+				case e.Type == proxias.EventTypeActionRequest || e.Type == proxias.EventTypeActionResult:
 					fmt.Printf("\033[2m%s %s\033[0m\n", e.Type, e.Text())
 				case e.Source == agent.AsSource():
 					if text := strings.TrimSpace(e.Text()); text != "" {

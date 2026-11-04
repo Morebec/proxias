@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 )
 
 // devKey is the development key the examples set ANTHROPIC_API_KEY to when it
@@ -25,12 +25,12 @@ const ClaudeModel = "claude-haiku-5-5"
 var claude = flag.Bool("claude", false, "run on Claude ("+ClaudeModel+", ANTHROPIC_API_KEY) instead of a script")
 
 // Print prints an event on one line (Line).
-func Print(e agentsdk.Event) { fmt.Println(Line(e)) }
+func Print(e proxias.Event) { fmt.Println(Line(e)) }
 
 // Line is an event on one line, in color on a terminal (unless NO_COLOR is
 // set): the source by who it is (each agent
 // its own color), the event by its type.
-func Line(e agentsdk.Event) string {
+func Line(e proxias.Event) string {
 	source := fmt.Sprintf("%-22s", e.Source)
 	kind := fmt.Sprintf("%-20s", e.Type)
 	text := strings.ReplaceAll(e.Text(), "\n", " ")
@@ -82,11 +82,11 @@ func paint(style, text string) string {
 	return style + text + reset
 }
 
-func sourceColor(s agentsdk.EventSource) string {
+func sourceColor(s proxias.EventSource) string {
 	switch s.Type {
-	case agentsdk.EventSourceTypeUser:
+	case proxias.EventSourceTypeUser:
 		return bold + green
-	case agentsdk.EventSourceTypeAgent:
+	case proxias.EventSourceTypeAgent:
 		hash := 0
 		for _, r := range s.ID {
 			hash = hash*31 + int(r)
@@ -98,14 +98,14 @@ func sourceColor(s agentsdk.EventSource) string {
 	}
 }
 
-func typeColor(e agentsdk.Event) string {
+func typeColor(e proxias.Event) string {
 	switch e.Type {
-	case agentsdk.EventTypeThought:
+	case proxias.EventTypeThought:
 		return dim
-	case agentsdk.EventTypeActionRequest:
+	case proxias.EventTypeActionRequest:
 		return magenta
-	case agentsdk.EventTypeActionResult:
-		var result agentsdk.ActionExecutionResult
+	case proxias.EventTypeActionResult:
+		var result proxias.ActionExecutionResult
 		if json.Unmarshal(e.Payload, &result) == nil && result.Status == "failed" {
 			return red
 		}
@@ -115,9 +115,9 @@ func typeColor(e agentsdk.Event) string {
 	}
 }
 
-func textColor(e agentsdk.Event) string {
+func textColor(e proxias.Event) string {
 	switch e.Type {
-	case agentsdk.EventTypeThought:
+	case proxias.EventTypeThought:
 		return dim + italic
 	default:
 		return typeColor(e)

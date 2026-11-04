@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 )
 
 // tool is an action of the catalog: its ID, what it does, and its parameters,
@@ -756,14 +756,14 @@ func (c *calls) all() []call {
 // catalogActions are the actions of the catalog, recorded in c: an action
 // refuses a call that lacks a required
 // parameter; crm_find_customer knows Globex; any other answers that it is done.
-func catalogActions(c *calls) agentsdk.ActionExecutor {
-	executor := agentsdk.SimpleActionExecutor{
-		Actions: map[string]agentsdk.SimpleAction{},
+func catalogActions(c *calls) proxias.ActionExecutor {
+	executor := proxias.SimpleActionExecutor{
+		Actions: map[string]proxias.SimpleAction{},
 	}
 	for _, t := range catalog {
 		schema, required := schemaOf(t.params)
-		executor.Actions[t.id] = agentsdk.SimpleAction{
-			ActionDescriptor: agentsdk.ActionDescriptor{
+		executor.Actions[t.id] = proxias.SimpleAction{
+			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          t.id,
 				Name:        t.id,
 				Description: t.description,
@@ -771,14 +771,14 @@ func catalogActions(c *calls) agentsdk.ActionExecutor {
 			},
 			RunFn: func(
 				_ context.Context,
-				_ agentsdk.Session,
+				_ proxias.Session,
 				params map[string]any,
-			) (agentsdk.ActionExecutionResult, error) {
+			) (proxias.ActionExecutionResult, error) {
 				for _, name := range required {
 					v := params[name] // nil when it is missing
 					if v == nil || v == "" {
 						c.record(t.id, params, true)
-						return agentsdk.ActionExecutionResult{
+						return proxias.ActionExecutionResult{
 							ActionID: t.id,
 							Status:   "failed",
 							Data: map[string]any{
@@ -799,7 +799,7 @@ func catalogActions(c *calls) agentsdk.ActionExecutor {
 						}
 					}
 				}
-				return agentsdk.ActionExecutionResult{
+				return proxias.ActionExecutionResult{
 					ActionID: t.id,
 					Status:   "completed",
 					Data:     data,

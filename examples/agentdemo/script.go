@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morebec/proxias/agentsdk"
+	"github.com/morebec/proxias"
 )
 
 // The markers of a scripted answer: <thought>...</thought>,
@@ -39,28 +39,28 @@ var markers = regexp.MustCompile(
 // parseAnswer reads the events of a scripted answer, in order: a thought, an
 // action request, and the text before Done as
 // the reply.
-func parseAnswer(answer string) []agentsdk.Event {
-	event := func(t agentsdk.EventType, payload string) agentsdk.Event {
-		return agentsdk.Event{
+func parseAnswer(answer string) []proxias.Event {
+	event := func(t proxias.EventType, payload string) proxias.Event {
+		return proxias.Event{
 			Type:    t,
 			Payload: []byte(strings.TrimSpace(payload)),
 		}
 	}
-	var events []agentsdk.Event
+	var events []proxias.Event
 	last := 0
 	for _, m := range markers.FindAllStringSubmatchIndex(answer, -1) {
 		residual := strings.TrimSpace(answer[last:m[0]])
 		last = m[1]
 		switch {
 		case m[2] >= 0:
-			events = append(events, event(agentsdk.EventTypeThought, answer[m[2]:m[3]]))
+			events = append(events, event(proxias.EventTypeThought, answer[m[2]:m[3]]))
 		case m[4] >= 0:
 			if residual != "" {
-				events = append(events, event(agentsdk.EventTypeThought, residual))
+				events = append(events, event(proxias.EventTypeThought, residual))
 			}
-			events = append(events, event(agentsdk.EventTypeActionRequest, answer[m[4]:m[5]]))
+			events = append(events, event(proxias.EventTypeActionRequest, answer[m[4]:m[5]]))
 		default:
-			events = append(events, event(agentsdk.EventTypeMessage, residual))
+			events = append(events, event(proxias.EventTypeMessage, residual))
 		}
 	}
 	return events
