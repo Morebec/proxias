@@ -78,7 +78,10 @@ func TestObservePlanExecuteStrategy(t *testing.T) {
 			},
 		},
 		{
-			name: "GIVEN the agent's plan, then a system's instruction (a clock) THEN the turn still runs the plan's first step",
+			name: "GIVEN the agent's plan, then a system's message THEN it is new input: the turn plans again, running no step",
+			answers: []string{
+				`{"steps":[{"action":"send_email","input":{"to":"joe@globex.com"}}]}`,
+			},
 			actions: map[string]proxias.ActionExecutionResult{
 				"send_email": {
 					ActionID: "send_email",
@@ -94,17 +97,13 @@ func TestObservePlanExecuteStrategy(t *testing.T) {
 				proxias.NewMessageEvent(proxias.NewSystemSource("clock"), "It is noon."),
 			},
 			then: []string{
-				`action.request agent:ada {"action_id":"send_email","params":{"to":"joe@globex.com"}}`,
-				`action.result system:actions {"action_id":"send_email","status":"completed"}`,
+				`cognition.thought agent:ada {"steps":[{"action":"send_email","input":{"to":"joe@globex.com"}}]}`,
 			},
-			ran: map[string]map[string]any{
-				"send_email": {
-					"to": "joe@globex.com",
-				},
-			},
+			ran:   map[string]map[string]any{},
+			calls: 1,
 		},
 		{
-			name: "GIVEN a step's result, then a system's instruction THEN the plan is still told what the step found",
+			name: "GIVEN a step's result, then a system's message THEN it begins a new task: the answer is told no step ran",
 			answers: []string{
 				`{"steps":[]}`,
 				"I found Globex.",
@@ -134,7 +133,7 @@ func TestObservePlanExecuteStrategy(t *testing.T) {
 			ran:   map[string]map[string]any{},
 			calls: 2,
 			told: []string{
-				`- {"action_id":"find_customer","params":{"name":"Globex"}}: {"action_id":"find_customer","status":"completed"}`,
+				"No step has run yet.",
 			},
 			stop: proxias.StopReasonEndTurn,
 		},

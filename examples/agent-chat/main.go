@@ -117,11 +117,20 @@ func main() {
 	}
 }
 
-// withClock tells the turn the time it is, as a system message of its session
-// for this turn only.
+// withClock tells the turn that answers a person's message the time it is, as a
+// system message of its session for this turn only. The turns that follow the
+// agent's own events are told nothing: the time goes with what the person
+// said, it is no news of its own.
 func withClock(next proxias.CognitiveStrategy) proxias.CognitiveStrategy {
 	return proxias.StrategyFunc(
 		func(ctx context.Context, inv proxias.Invocation) iter.Seq[proxias.StreamUpdate] {
+			last := inv.LastEvent()
+			if last.Type != proxias.EventTypeMessage {
+				return next.Invoke(ctx, inv)
+			}
+			if !last.HasSourceType(proxias.EventSourceTypeUser) {
+				return next.Invoke(ctx, inv)
+			}
 			inv.Session = inv.Session.WithEvents(
 				proxias.NewMessageEvent(
 					proxias.NewSystemSource("clock"),

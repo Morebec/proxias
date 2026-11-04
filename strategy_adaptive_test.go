@@ -115,7 +115,7 @@ func TestAdaptiveStrategy(t *testing.T) {
 			},
 		},
 		{
-			name:    "GIVEN a recorded choice, then the agent's plan and a system's instruction THEN the task keeps to its strategy",
+			name:    "GIVEN a recorded choice, then the agent's plan and a system's message THEN the message is a new task: the selector chooses again",
 			chooses: "react",
 			given: []proxias.Event{
 				proxias.NewEvent(proxias.EventTypeThought, proxias.NewAgentSource("ada"), []byte(`{"strategy":"observe-plan-execute"}`)),
@@ -123,8 +123,10 @@ func TestAdaptiveStrategy(t *testing.T) {
 				proxias.NewMessageEvent(proxias.NewSystemSource("clock"), "It is noon."),
 			},
 			then: []string{
-				"message observe-plan-execute",
+				`cognition.thought {"strategy":"react"}`,
+				"message react",
 			},
+			selected: 1,
 		},
 		{
 			name:    "GIVEN a finished task, then a new message THEN the selector chooses again: a new task",

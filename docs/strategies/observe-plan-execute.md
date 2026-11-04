@@ -23,14 +23,15 @@ A turn is one phase; `Agent.Loop` runs them in turn, and the session carries the
    first step runs before the next plan, so the model fills the later steps' inputs once it has seen what the earlier
    ones found; there are no references between steps. When the plan has no step (the task is done, needs no action,
    or cannot go further), or the agent has no actions, the turn reports instead.
-2. **Execute.** When the agent's last event is its plan (the system's messages after it, such as a clock, are
-   instructions and do not count), the agent runs the plan's first step, one `ActionExecutor.Execute` call, and the
-   turn ends with its request and result, for the next turn to observe.
+2. **Execute.** When the agent's last event is its plan, the agent runs the plan's first step, one
+   `ActionExecutor.Execute` call, and the turn ends with its request and result, for the next turn to observe. Any
+   other last event, a system's message included, is new input: the turn observes and plans again.
 3. **Report.** One model call, given the report prompt, who the agent is, what the steps found, and the session,
    writes the answer. Its text is streamed, and the turn ends with the model's stop reason, which ends the loop.
 
 What the steps found is every action the agent ran since the event that began the task (the last one that is neither
-the agent's own, a result, nor a system's message), its request and its result.
+the agent's own nor a result), its request and its result. A middleware that adds an instruction to every turn (a
+clock, say) begins a new task each time: add it to the turns that answer a new message only.
 
 ## Events
 

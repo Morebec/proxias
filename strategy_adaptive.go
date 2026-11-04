@@ -13,8 +13,8 @@ import (
 //
 // A turn has two phases:
 //   - choose: when the turn follows an outside event (a person's message, a
-//     probe, an event of another agent: anything but the agent's own events,
-//     the results of its actions and the system's instructions), the selector
+//     probe, a system's message, an event of another agent: anything but the
+//     agent's own events and the results of its actions), the selector
 //     chooses a candidate from the session, and the choice is yielded as a
 //     thought of the agent ({"strategy":"rewoo"}). The turns that follow the
 //     agent's own events, until the next outside event, keep to the strategy
@@ -63,7 +63,7 @@ type adaptiveChoice struct {
 // or, after an outside event, the one the selector chooses.
 func (s AdaptiveCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate] {
 	return func(yield func(StreamUpdate) bool) {
-		name, isRecorded := recordedStrategy(inv)
+		name, isRecorded := s.recordedStrategy(inv)
 		if !isRecorded {
 			chosen, ok := s.choose(ctx, inv, yield)
 			if !ok {
@@ -78,14 +78,11 @@ func (s AdaptiveCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) i
 
 // recordedStrategy is the name of the strategy the session records for the
 // task the turn is in: none when the turn follows an outside event.
-func recordedStrategy(inv Invocation) (string, bool) {
+func (s AdaptiveCognitiveStrategy) recordedStrategy(inv Invocation) (string, bool) {
 	currentAgent := inv.Agent.AsSource()
 	events := inv.Session.Events()
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
-		if isSystemMessage(e) {
-			continue
-		}
 		if e.Type == EventTypeActionResult {
 			continue
 		}

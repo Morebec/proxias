@@ -65,7 +65,7 @@ type observePlanExecuteStep struct {
 // report when none is left.
 func (s ObservePlanExecuteCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate] {
 	return func(yield func(StreamUpdate) bool) {
-		plan, planEvent, isPlanned := lastObservePlanExecutePlan(inv)
+		plan, planEvent, isPlanned := s.lastPlan(inv)
 		if isPlanned {
 			s.execute(ctx, inv, plan, planEvent, yield)
 			return
@@ -75,37 +75,23 @@ func (s ObservePlanExecuteCognitiveStrategy) Invoke(ctx context.Context, inv Inv
 	}
 }
 
-// lastObservePlanExecutePlan is the agent's plan and its event, when it is the
-// last event of the session but the system's messages after it: instructions
-// (a clock, a middleware's), not what happened.
-func lastObservePlanExecutePlan(inv Invocation) (observePlanExecutePlan, Event, bool) {
+// lastPlan is the agent's plan and its event, when it is the last event of
+// the session.
+func (s ObservePlanExecuteCognitiveStrategy) lastPlan(inv Invocation) (observePlanExecutePlan, Event, bool) {
 	var plan observePlanExecutePlan
-	events := inv.Session.Events()
-	last := len(events) - 1
-	for last >= 0 && isSystemMessage(events[last]) {
-		last--
-	}
-	if last < 0 {
+	last := inv.LastEvent()
+	if last.Type != EventTypeThought {
 		return plan, Event{}, false
 	}
-	if events[last].Type != EventTypeThought {
-		return plan, Event{}, false
-	}
-	if events[last].Source != inv.Agent.AsSource() {
+	if last.Source != inv.Agent.AsSource() {
 		return plan, Event{}, false
 	}
 
-	err := json.Unmarshal(events[last].Payload, &plan)
+	err := json.Unmarshal(last.Payload, &plan)
 	if err != nil {
 		return plan, Event{}, false
 	}
-	return plan, events[last], len(plan.Steps) > 0
-}
-
-// isSystemMessage tells whether the event is a message of a system: an
-// instruction.
-func isSystemMessage(e Event) bool {
-	return e.Type == EventTypeMessage && e.HasSourceType(EventSourceTypeSystem)
+	return plan, last, len(plan.Steps) > 0
 }
 
 // observeAndPlan has the model write the plan of the steps left, from what the
@@ -150,7 +136,7 @@ func (s ObservePlanExecuteCognitiveStrategy) observeAndPlan(
 			{Text: planPrompt},
 			{Text: agentPrompt.String()},
 			{Text: string(inventory)},
-			{Text: observedSteps(inv)},
+			{Text: s.observedSteps(inv)},
 		},
 	}
 	llmRequest := NewLLMRequestFromSession(inv.Agent.AsSource(), inv.Session)
@@ -259,7 +245,7 @@ func (s ObservePlanExecuteCognitiveStrategy) report(
 		Parts: []LLMPart{
 			{Text: reportPrompt},
 			{Text: agentPrompt.String()},
-			{Text: observedSteps(inv)},
+			{Text: s.observedSteps(inv)},
 		},
 	}
 	llmRequest := NewLLMRequestFromSession(currentAgent, inv.Session)
@@ -310,18 +296,15 @@ func (s ObservePlanExecuteCognitiveStrategy) report(
 // observedSteps is what the steps of the task found so far, as the model is
 // told it: each action the agent ran since the event that began the task, its
 // input, and its result's status and data.
-func observedSteps(inv Invocation) string {
+func (s ObservePlanExecuteCognitiveStrategy) observedSteps(inv Invocation) string {
 	events := inv.Session.Events()
 	currentAgent := inv.Agent.AsSource()
 
-	// The task began with the last event that is neither the agent's own, the
-	// result of one of its actions, nor a system's instruction.
+	// The task began with the last event that is neither the agent's own nor
+	// the result of one of its actions.
 	begin := 0
 	for i := len(events) - 1; i >= 0; i-- {
 		if events[i].Source == currentAgent {
-			continue
-		}
-		if isSystemMessage(events[i]) {
 			continue
 		}
 		if events[i].Type == EventTypeActionResult {

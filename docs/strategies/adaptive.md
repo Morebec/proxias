@@ -6,8 +6,8 @@ must adapt to Observe-Plan-Execute.
 
 ## How a turn runs
 
-1. **Choose.** When the turn follows an outside event (a person's message, a probe, an event of another agent:
-   anything but the agent's own events, the results of its actions and the system's messages), the `StrategySelector`
+1. **Choose.** When the turn follows an outside event (a person's message, a probe, a system's message, an event of
+   another agent: anything but the agent's own events and the results of its actions), the `StrategySelector`
    chooses a candidate, by name, from the session and the candidates' descriptions. The choice is yielded as a thought
    of the agent:
 
