@@ -11,7 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReActCognitiveStrategy is the ReAct strategy.
+// ReActCognitiveStrategy is the ReAct strategy (Reason and Act): the model
+// thinks and acts in turns, deciding each step after it sees the last one's
+// result.
+//
+// A turn has two phases:
+//   - reason: one model call, given who the agent is, the session, and every
+//     action of the agent as a tool with its schema; its text is streamed.
+//   - act: when the model called tools, the agent runs them, all in one
+//     execution, and the turn ends with their results, for the next turn to
+//     reason on. When it called none, its answer is the reply.
+//
+// So a task of N dependent steps takes about N + 1 model calls, each reading
+// the whole conversation again. It suits open-ended tasks and conversations,
+// where the next step depends on what the last one found. Its trade-off is
+// the cost of that adaptivity: ReWOO, which plans the steps up front, takes two
+// calls whatever their number, but never sees a result before the answer.
 type ReActCognitiveStrategy struct {
 	LLM          LLM
 	SystemPrompt string

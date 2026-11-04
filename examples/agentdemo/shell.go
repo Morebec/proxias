@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"iter"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +37,9 @@ const (
 	// as a System One model (proxias.System1ActionSelector of
 	// adapters.LLMSystem1), its extractor Claude.
 	StrategyGatedSplit = "gated-split"
+	// StrategyReWOO is the ReWOO strategy: a plan of the whole task, its steps
+	// run, then the answer (proxias.ReWOOCognitiveStrategy).
+	StrategyReWOO = "rewoo"
 )
 
 // Strategies are all the strategies, in the order of the bench.
@@ -44,6 +48,7 @@ var Strategies = []string{
 	StrategyGated,
 	StrategyGatedComposite,
 	StrategyGatedSplit,
+	StrategyReWOO,
 }
 
 // aliases are the names the strategies had as shells.
@@ -247,10 +252,85 @@ func (env Env) StrategyOf(kind string, onClaude bool, script Script) proxias.Cog
 			scripted,
 			proxias.NewReActStrategy(scriptedLLM(script.Reasoning)),
 		)
+	case StrategyReWOO:
+		if onClaude {
+			return proxias.NewReWOOStrategy(env.llm(true, nil))
+		}
+		return proxias.NewReWOOStrategy(reWOOScript(script))
 	default:
 		log.Fatalf("-strategy %q: it is one of %s", kind, strings.Join(Strategies, ", "))
 		return nil
 	}
+}
+
+// reWOOScript is the scripted Claude of the ReWOO strategy: its plans are the
+// requests of each turn it plans, then none; its answers are a turn's
+// synthesis when it ran actions and its reasoning otherwise, then the
+// reasoning left (an agent without actions is asked no plan).
+func reWOOScript(script Script) proxias.LLM {
+	var plans, answers []string
+	synthesis, reasoning := 0, 0
+	for _, requests := range script.Requests {
+		steps := make([]map[string]any, 0, len(requests))
+		for i, request := range requests {
+			step := map[string]any{
+				"id":     fmt.Sprintf("E%d", i+1),
+				"action": request.ActionID,
+				"input":  request.Params,
+			}
+			steps = append(steps, step)
+		}
+		plan, _ := json.Marshal(map[string]any{"steps": steps}) // the params of a script marshal
+		plans = append(plans, string(plan)+Done)
+
+		if len(requests) > 0 && synthesis < len(script.Syntheses) {
+			answers = append(answers, script.Syntheses[synthesis]+Done)
+			synthesis++
+			continue
+		}
+		if reasoning < len(script.Reasoning) {
+			answers = append(answers, script.Reasoning[reasoning])
+			reasoning++
+		}
+	}
+	for range 32 {
+		plans = append(plans, `{"steps":[]}`+Done)
+	}
+	answers = append(answers, script.Reasoning[reasoning:]...)
+
+	return plannedLLM{
+		planner:  scriptedLLM(plans),
+		answerer: scriptedLLM(answers),
+	}
+}
+
+// plannedLLM is the scripted model of a strategy that plans: the planner
+// answers the calls whose system prompt opens with a plan prompt, the answerer
+// the others.
+type plannedLLM struct {
+	planner  proxias.LLM
+	answerer proxias.LLM
+}
+
+// Complete asks the planner or the answerer, as the call's system prompt says.
+func (l plannedLLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[proxias.LLMChunk, error] {
+	if isPlanRequest(req) {
+		return l.planner.Complete(ctx, req)
+	}
+	return l.answerer.Complete(ctx, req)
+}
+
+// isPlanRequest tells whether the request opens with a plan prompt.
+func isPlanRequest(req proxias.LLMRequest) bool {
+	if len(req.Messages) == 0 {
+		return false
+	}
+	for _, part := range req.Messages[0].Parts {
+		if strings.HasPrefix(part.Text, proxias.DefaultReWOOPlanPrompt) {
+			return true
+		}
+	}
+	return false
 }
 
 // Client is the client of Claude of the examples, which Counter counts: its key
