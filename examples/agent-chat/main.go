@@ -27,6 +27,7 @@ import (
 
 	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
+	"github.com/morebec/proxias/schema"
 	"github.com/morebec/proxias/transports/agenthttp"
 	"github.com/morebec/proxias/transports/agentprotocolhttp"
 	"github.com/morebec/proxias/transports/openaihttp"
@@ -55,7 +56,10 @@ func main() {
 			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "send_email",
 				Description: "Sends an email.",
-				InputSchema: agentdemo.Params("to", "the address", "body", "the text"),
+				InputSchema: schema.Object().
+					String("to", "the address").Required().
+					String("body", "the text").Required().
+					Map(),
 			},
 			Run: func(_ context.Context, params map[string]any) (any, error) {
 				return fmt.Sprintf("sent to %v", params["to"]), nil

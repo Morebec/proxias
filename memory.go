@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/morebec/proxias/schema"
 )
 
 // MemoryProvider is an agent's memory beyond a session: what it recalls for a
@@ -159,16 +161,9 @@ func (m MarkdownMemory) ActionExecutor() ActionExecutor {
 					ID:          "update_memory",
 					Name:        "Update memory",
 					Description: description,
-					InputSchema: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"content": map[string]any{
-								"type": "string",
-								"description": "the whole new document, " +
-									"in markdown",
-							}},
-						"required": []string{"content"},
-					},
+					InputSchema: schema.Object().
+						String("content", "the whole new document, in markdown").Required().
+						Map(),
 				},
 				RunFn: func(_ context.Context, _ Session, params map[string]any) (ActionExecutionResult, error) {
 					// A failure is the action's, told in its result.

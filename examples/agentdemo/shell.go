@@ -485,25 +485,6 @@ type Action struct {
 	Run func(ctx context.Context, params map[string]any) (any, error)
 }
 
-// Params is the JSON Schema of an object of string parameters, all required:
-// pairs of name and description.
-func Params(pairs ...string) map[string]any {
-	properties := map[string]any{}
-	var required []string
-	for i := 0; i+1 < len(pairs); i += 2 {
-		properties[pairs[i]] = map[string]any{
-			"type":        "string",
-			"description": pairs[i+1],
-		}
-		required = append(required, pairs[i])
-	}
-	return map[string]any{
-		"type":       "object",
-		"properties": properties,
-		"required":   required,
-	}
-}
-
 func parse() {
 	if !flag.Parsed() {
 		flag.Parse()

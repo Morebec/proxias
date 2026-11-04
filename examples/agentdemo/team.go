@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/morebec/proxias"
+	"github.com/morebec/proxias/schema"
 )
 
 // Ask is how the examples have an agent talk to another: an action of the app,
@@ -25,11 +26,10 @@ func Ask(from, to proxias.Agent, strategy proxias.CognitiveStrategy) proxias.Act
 				Name: id,
 				Description: "Asks " + to.Name + " (" + to.Role + ") " +
 					"something, and gives its reply.",
-				InputSchema: Params(
-					"message",
-					"what to ask or tell it, in full: it knows nothing else "+
-						"of your work",
-				),
+				InputSchema: schema.Object().
+					String("message", "what to ask or tell it, in full: it knows nothing else "+
+						"of your work").Required().
+					Map(),
 			},
 			RunFn: func(
 				ctx context.Context,

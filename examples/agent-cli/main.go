@@ -48,6 +48,7 @@ import (
 	agentanthropic "github.com/morebec/proxias/adapters/anthropic"
 	agentopenai "github.com/morebec/proxias/adapters/openai"
 	"github.com/morebec/proxias/examples/agentdemo"
+	"github.com/morebec/proxias/schema"
 )
 
 var (
@@ -121,7 +122,9 @@ func main() {
 						ID: "read_file",
 						Description: "Reads a file of the workspace (a path " +
 							"relative to it, or absolute).",
-						InputSchema: agentdemo.Params("path", "the path of the file"),
+						InputSchema: schema.Object().
+							String("path", "the path of the file").Required().
+							Map(),
 					},
 					RunFn: func(
 						_ context.Context,
@@ -152,12 +155,10 @@ func main() {
 						Description: "Writes a file of the workspace, " +
 							"creating it and its directories, or replacing " +
 							"it.",
-						InputSchema: agentdemo.Params(
-							"path",
-							"the path of the file",
-							"content",
-							"the whole content of the file",
-						),
+						InputSchema: schema.Object().
+							String("path", "the path of the file").Required().
+							String("content", "the whole content of the file").Required().
+							Map(),
 					},
 					RunFn: func(
 						_ context.Context,
@@ -190,7 +191,9 @@ func main() {
 						Description: "Runs a bash command in the workspace, " +
 							"for up to 60 seconds, and tells its output and " +
 							"exit code.",
-						InputSchema: agentdemo.Params("command", "the command, as bash -c runs it"),
+						InputSchema: schema.Object().
+							String("command", "the command, as bash -c runs it").Required().
+							Map(),
 					},
 					RunFn: func(
 						ctx context.Context,

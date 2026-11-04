@@ -8,6 +8,7 @@ import (
 
 	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
+	"github.com/morebec/proxias/schema"
 )
 
 // all are the scenarios of the examples, each agent with its own action.
@@ -36,7 +37,10 @@ func chat(ctx context.Context, r *run) (bool, string, error) {
 			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "send_email",
 				Description: "Sends an email.",
-				InputSchema: agentdemo.Params("to", "the address", "body", "the text"),
+				InputSchema: schema.Object().
+					String("to", "the address").Required().
+					String("body", "the text").Required().
+					Map(),
 			},
 			Run: func(_ context.Context, params map[string]any) (any, error) {
 				mutex.Lock()
@@ -150,7 +154,9 @@ func unattended(ctx context.Context, r *run) (bool, string, error) {
 			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "page_oncall",
 				Description: "Pages the engineer on call.",
-				InputSchema: agentdemo.Params("reason", "why, in one sentence"),
+				InputSchema: schema.Object().
+					String("reason", "why, in one sentence").Required().
+					Map(),
 			},
 			Run: func(context.Context, map[string]any) (any, error) {
 				return "paged", nil

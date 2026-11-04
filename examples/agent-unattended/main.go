@@ -11,6 +11,7 @@ import (
 
 	"github.com/morebec/proxias"
 	"github.com/morebec/proxias/examples/agentdemo"
+	"github.com/morebec/proxias/schema"
 )
 
 func main() {
@@ -28,7 +29,9 @@ func main() {
 			ActionDescriptor: proxias.ActionDescriptor{
 				ID:          "page_oncall",
 				Description: "Pages the engineer on call.",
-				InputSchema: agentdemo.Params("reason", "why, in one sentence"),
+				InputSchema: schema.Object().
+					String("reason", "why, in one sentence").Required().
+					Map(),
 			},
 			Run: func(context.Context, map[string]any) (any, error) {
 				return "paged", nil
