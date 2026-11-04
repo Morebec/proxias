@@ -116,15 +116,17 @@ func TestLLMSystem1(t *testing.T) {
 				}),
 			)
 			defer server.Close()
-			system1 := adapters.LLMSystem1{
-				LLM: agentanthropic.NewLLM(
-					anthropicsdk.NewClient(
-						option.WithBaseURL(server.URL),
-						option.WithAPIKey("test"),
-						option.WithMaxRetries(0),
-					),
-					"m",
+			llm := agentanthropic.NewLLM(
+				anthropicsdk.NewClient(
+					option.WithBaseURL(server.URL),
+					option.WithAPIKey("test"),
+					option.WithMaxRetries(0),
 				),
+				"m",
+			)
+			llm.Buffered = true // the server answers a whole message
+			system1 := adapters.LLMSystem1{
+				LLM:          llm,
 				ChoicePrompt: tt.prompt, ScorePrompt: tt.prompt, NoulPrompt: tt.prompt,
 			}
 

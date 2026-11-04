@@ -198,6 +198,7 @@ func TestReActStrategy(t *testing.T) {
 				),
 				"m",
 			)
+			llm.Buffered = true // the server answers a whole message
 			agent := proxias.Agent{ID: "ada"}
 			if tt.actions != nil {
 				agent.ActionExecutor = proxias.SimpleActionExecutor{
@@ -429,6 +430,7 @@ func TestReActStrategyRequest(t *testing.T) {
 				),
 				"m",
 			)
+			llm.Buffered = true // the server answers a whole message
 			agent := proxias.Agent{
 				ID:           "ada",
 				AgentPersona: proxias.AgentPersona{Name: "Ada"},

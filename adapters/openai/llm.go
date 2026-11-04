@@ -25,11 +25,11 @@ type LLM struct {
 	client    openai.Client
 	model     string
 	maxTokens int64
-	// Streaming has Complete stream the answer: its text is handed out as the
-	// model writes it, its tool calls once the answer is whole (a reasoning
-	// the server streams is not handed out). Unset, the answer is read whole,
-	// then handed out.
-	Streaming bool
+	// Buffered has Complete read the answer whole, then hand it out, instead
+	// of streaming it: by default its text is handed out as the model writes
+	// it, its tool calls once the answer is whole (a reasoning the server
+	// streams is not handed out; a buffered answer gives it).
+	Buffered bool
 }
 
 var _ proxias.LLM = LLM{}
@@ -37,7 +37,7 @@ var _ proxias.LLM = LLM{}
 // NewLLM returns the model of the client as an proxias.LLM: the system prompt
 // is system messages, the conversation is the API's (tool calls in the
 // assistant's messages, their results as tool messages), and the answer is read
-// whole, then handed out as chunks (Streaming streams it). A model's thinking (another vendor's) is
+// streamed (Buffered reads it whole). A model's thinking (another vendor's) is
 // not given to it: the API takes none.
 func NewLLM(client openai.Client, model string) LLM {
 	return LLM{client: client, model: model, maxTokens: DefaultMaxTokens}
@@ -66,11 +66,11 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			)
 		}
 
-		if m.Streaming {
-			m.stream(ctx, params, yield)
+		if m.Buffered {
+			m.complete(ctx, params, yield)
 			return
 		}
-		m.complete(ctx, params, yield)
+		m.stream(ctx, params, yield)
 	}
 }
 

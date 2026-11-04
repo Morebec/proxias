@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -27,12 +28,19 @@ type Usage struct {
 // UsageCounter counts the usage of the calls of the clients built with its
 // Middleware: of every component that uses them (a ReAct shell's Model as much
 // as a classifier or a synthesizer of Proxias). It reads the usage of the
-// responses that are JSON; a streamed response is counted as a call, without
-// its tokens. It is safe for
-// concurrent use.
+// responses that are JSON, and of those streamed, once their stream is read.
+// It is safe for concurrent use.
 type UsageCounter struct {
 	mutex sync.Mutex
 	usage Usage
+}
+
+// tokens is the usage of a response, as Claude tells it.
+type tokens struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 }
 
 // Middleware is the client option that counts its calls:
@@ -44,15 +52,20 @@ func (c *UsageCounter) Middleware() option.Middleware {
 		if err != nil {
 			return resp, err
 		}
-		var usage struct {
-			Usage struct {
-				InputTokens              int64 `json:"input_tokens"`
-				OutputTokens             int64 `json:"output_tokens"`
-				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-				CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-			} `json:"usage"`
+		contentType := resp.Header.Get("Content-Type")
+		if strings.HasPrefix(contentType, "text/event-stream") && resp.Body != nil {
+			resp.Body = &countedStream{
+				body:    resp.Body,
+				counter: c,
+				began:   began,
+			}
+			return resp, nil
 		}
-		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") && resp.Body != nil {
+
+		var usage struct {
+			Usage tokens `json:"usage"`
+		}
+		if strings.HasPrefix(contentType, "application/json") && resp.Body != nil {
 			body, rerr := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(body))
@@ -61,17 +74,78 @@ func (c *UsageCounter) Middleware() option.Middleware {
 			}
 			_ = json.Unmarshal(body, &usage) // a body without usage counts none
 		}
-
-		c.mutex.Lock()
-		defer c.mutex.Unlock()
-		c.usage.Calls++
-		c.usage.InputTokens += usage.Usage.InputTokens
-		c.usage.OutputTokens += usage.Usage.OutputTokens
-		c.usage.CacheCreationInputTokens += usage.Usage.CacheCreationInputTokens
-		c.usage.CacheReadInputTokens += usage.Usage.CacheReadInputTokens
-		c.usage.CallDuration += time.Since(began)
+		c.count(usage.Usage, time.Since(began))
 		return resp, nil
 	}
+}
+
+// count adds a call and its tokens.
+func (c *UsageCounter) count(spent tokens, took time.Duration) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.usage.Calls++
+	c.usage.InputTokens += spent.InputTokens
+	c.usage.OutputTokens += spent.OutputTokens
+	c.usage.CacheCreationInputTokens += spent.CacheCreationInputTokens
+	c.usage.CacheReadInputTokens += spent.CacheReadInputTokens
+	c.usage.CallDuration += took
+}
+
+// countedStream is a streamed response, counted once it is read to its end or
+// closed: its input tokens are in its message_start event, its output tokens
+// in its message_delta events, the last one the total.
+type countedStream struct {
+	body    io.ReadCloser
+	counter *UsageCounter
+	began   time.Time
+	read    bytes.Buffer
+	once    sync.Once
+}
+
+func (s *countedStream) Read(p []byte) (int, error) {
+	n, err := s.body.Read(p)
+	s.read.Write(p[:n])
+	if err != nil {
+		s.end()
+	}
+	return n, err
+}
+
+func (s *countedStream) Close() error {
+	s.end()
+	return s.body.Close()
+}
+
+// end counts the stream, once.
+func (s *countedStream) end() {
+	s.once.Do(func() {
+		var spent tokens
+		scanner := bufio.NewScanner(bytes.NewReader(s.read.Bytes()))
+		scanner.Buffer(make([]byte, 64<<10), 4<<20)
+		for scanner.Scan() {
+			data, ok := bytes.CutPrefix(scanner.Bytes(), []byte("data: "))
+			if !ok {
+				continue
+			}
+			var event struct {
+				Type    string `json:"type"`
+				Message struct {
+					Usage tokens `json:"usage"`
+				} `json:"message"`
+				Usage tokens `json:"usage"`
+			}
+			if json.Unmarshal(data, &event) != nil {
+				continue
+			}
+			switch event.Type {
+			case "message_start":
+				spent = event.Message.Usage
+			case "message_delta":
+				spent.OutputTokens = event.Usage.OutputTokens
+			}
+		}
+		s.counter.count(spent, time.Since(s.began))
+	})
 }
 
 // Usage is the usage counted so far.

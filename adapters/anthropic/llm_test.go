@@ -565,6 +565,7 @@ func TestLLMComplete(t *testing.T) {
 
 			var chunks []proxias.LLMChunk
 			llm := anthropic.NewLLM(client, "m")
+			llm.Buffered = true
 			llm.Thinking = tt.thinking
 			for c, err := range llm.Complete(context.Background(), tt.when) {
 				require.NoError(t, err)
@@ -615,7 +616,9 @@ func TestLLMCompleteError(t *testing.T) {
 			client := mockClaude(t, tt.status, tt.body, &request)
 
 			var err error
-			for _, e := range anthropic.NewLLM(client, "m").Complete(context.Background(), proxias.LLMRequest{}) {
+			llm := anthropic.NewLLM(client, "m")
+			llm.Buffered = true
+			for _, e := range llm.Complete(context.Background(), proxias.LLMRequest{}) {
 				err = e
 			}
 
@@ -708,7 +711,6 @@ func TestLLMCompleteStreaming(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var request map[string]any
 			llm := anthropic.NewLLM(mockStreamingClaude(t, tt.events, &request), "m")
-			llm.Streaming = true
 
 			var chunks []proxias.LLMChunk
 			for chunk, err := range llm.Complete(context.Background(), proxias.LLMRequest{}) {

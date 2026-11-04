@@ -30,10 +30,10 @@ type LLM struct {
 	// default applies. Its thinking blocks are handed out, and given back
 	// signed as they came.
 	Thinking anthropic.ThinkingConfigParamUnion
-	// Streaming has Complete stream the answer: its text is handed out as
-	// Claude writes it, each of its other blocks (thinking, tool calls) once
-	// it is whole. Unset, the answer is read whole, then handed out.
-	Streaming bool
+	// Buffered has Complete read the answer whole, then hand it out, instead
+	// of streaming it: by default its text is handed out as Claude writes it,
+	// each of its other blocks (thinking, tool calls) once it is whole.
+	Buffered bool
 }
 
 var _ proxias.LLM = LLM{}
@@ -42,7 +42,7 @@ var _ proxias.LLM = LLM{}
 // is cached (with the tools, which come before it), the conversation is
 // Claude's (tool calls as tool_use blocks, their results as tool_result
 // blocks), and the
-// answer is read whole, then handed out as chunks (Streaming streams it).
+// answer is streamed (Buffered reads it whole).
 func NewLLM(client anthropic.Client, model anthropic.Model) LLM {
 	return LLM{
 		client:    client,
@@ -99,11 +99,11 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			)
 		}
 
-		if m.Streaming {
-			m.stream(ctx, params, yield)
+		if m.Buffered {
+			m.complete(ctx, params, yield)
 			return
 		}
-		m.complete(ctx, params, yield)
+		m.stream(ctx, params, yield)
 	}
 }
 

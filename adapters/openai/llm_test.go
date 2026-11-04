@@ -295,7 +295,9 @@ func TestLLMComplete(t *testing.T) {
 			)
 
 			var chunks []proxias.LLMChunk
-			for c, err := range openai.NewLLM(client, "m").Complete(context.Background(), tt.when) {
+			llm := openai.NewLLM(client, "m")
+			llm.Buffered = true
+			for c, err := range llm.Complete(context.Background(), tt.when) {
 				require.NoError(t, err)
 				chunks = append(chunks, c)
 			}
@@ -348,7 +350,9 @@ func TestLLMCompleteError(t *testing.T) {
 			)
 
 			var err error
-			for _, e := range openai.NewLLM(client, "m").Complete(context.Background(), proxias.LLMRequest{}) {
+			llm := openai.NewLLM(client, "m")
+			llm.Buffered = true
+			for _, e := range llm.Complete(context.Background(), proxias.LLMRequest{}) {
 				err = e
 			}
 
@@ -417,7 +421,6 @@ func TestLLMCompleteStreaming(t *testing.T) {
 				option.WithMaxRetries(0),
 			)
 			llm := openai.NewLLM(client, "m")
-			llm.Streaming = true
 
 			var chunks []proxias.LLMChunk
 			for c, err := range llm.Complete(context.Background(), proxias.LLMRequest{}) {
