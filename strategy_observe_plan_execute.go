@@ -48,9 +48,9 @@ func NewObservePlanExecuteStrategy(llm LLM) ObservePlanExecuteCognitiveStrategy 
 	return ObservePlanExecuteCognitiveStrategy{LLM: llm}
 }
 
-// observePlanExecutePlan is a plan of the Observe-Plan-Execute strategy, as the
-// model writes it: the steps left, in order.
-type observePlanExecutePlan struct {
+// opePlan is a plan of the Observe-Plan-Execute strategy, as the model writes
+// it: the steps left, in order.
+type opePlan struct {
 	Steps []observePlanExecuteStep `json:"steps"`
 }
 
@@ -65,8 +65,8 @@ type observePlanExecuteStep struct {
 // report when none is left.
 func (s ObservePlanExecuteCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate] {
 	return func(yield func(StreamUpdate) bool) {
-		plan, planEvent, isPlanned := s.lastPlan(inv)
-		if isPlanned {
+		plan, planEvent := s.lastPlan(inv)
+		if len(plan.Steps) > 0 {
 			s.execute(ctx, inv, plan, planEvent, yield)
 			return
 		}
@@ -77,21 +77,22 @@ func (s ObservePlanExecuteCognitiveStrategy) Invoke(ctx context.Context, inv Inv
 
 // lastPlan is the agent's plan and its event, when it is the last event of
 // the session.
-func (s ObservePlanExecuteCognitiveStrategy) lastPlan(inv Invocation) (observePlanExecutePlan, Event, bool) {
-	var plan observePlanExecutePlan
-	last := inv.LastEvent()
-	if last.Type != EventTypeThought {
-		return plan, Event{}, false
+func (s ObservePlanExecuteCognitiveStrategy) lastPlan(inv Invocation) (opePlan, Event) {
+	var plan opePlan
+	lastEvent := inv.LastEvent()
+	if lastEvent.Type != EventTypeThought {
+		return opePlan{}, Event{}
 	}
-	if last.Source != inv.Agent.AsSource() {
-		return plan, Event{}, false
+	if lastEvent.Source != inv.Agent.AsSource() {
+		return opePlan{}, Event{}
 	}
 
-	err := json.Unmarshal(last.Payload, &plan)
+	err := json.Unmarshal(lastEvent.Payload, &plan)
 	if err != nil {
-		return plan, Event{}, false
+		return opePlan{}, Event{}
 	}
-	return plan, last, len(plan.Steps) > 0
+
+	return plan, lastEvent
 }
 
 // observeAndPlan has the model write the plan of the steps left, from what the
@@ -159,7 +160,7 @@ func (s ObservePlanExecuteCognitiveStrategy) observeAndPlan(
 		yield(StreamUpdate{Err: errors.New("planning: the model's answer has no JSON object")})
 		return
 	}
-	var plan observePlanExecutePlan
+	var plan opePlan
 	decoder := json.NewDecoder(strings.NewReader(answerText[start:]))
 	if err := decoder.Decode(&plan); err != nil {
 		yield(StreamUpdate{Err: fmt.Errorf("planning: the model's answer is not a plan: %w", err)})
@@ -183,7 +184,7 @@ func (s ObservePlanExecuteCognitiveStrategy) observeAndPlan(
 func (s ObservePlanExecuteCognitiveStrategy) execute(
 	ctx context.Context,
 	inv Invocation,
-	plan observePlanExecutePlan,
+	plan opePlan,
 	planEvent Event,
 	yield func(StreamUpdate) bool,
 ) {

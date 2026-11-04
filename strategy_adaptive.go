@@ -63,9 +63,9 @@ type adaptiveChoice struct {
 // or, after an outside event, the one the selector chooses.
 func (s AdaptiveCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) iter.Seq[StreamUpdate] {
 	return func(yield func(StreamUpdate) bool) {
-		name, isRecorded := s.recordedStrategy(inv)
-		if !isRecorded {
-			chosen, ok := s.choose(ctx, inv, yield)
+		name := s.recordedStrategy(inv)
+		if name == "" {
+			chosen, ok := s.chooseStrategy(ctx, inv, yield)
 			if !ok {
 				return
 			}
@@ -78,7 +78,7 @@ func (s AdaptiveCognitiveStrategy) Invoke(ctx context.Context, inv Invocation) i
 
 // recordedStrategy is the name of the strategy the session records for the
 // task the turn is in: none when the turn follows an outside event.
-func (s AdaptiveCognitiveStrategy) recordedStrategy(inv Invocation) (string, bool) {
+func (s AdaptiveCognitiveStrategy) recordedStrategy(inv Invocation) string {
 	currentAgent := inv.Agent.AsSource()
 	events := inv.Session.Events()
 	for i := len(events) - 1; i >= 0; i-- {
@@ -87,7 +87,7 @@ func (s AdaptiveCognitiveStrategy) recordedStrategy(inv Invocation) (string, boo
 			continue
 		}
 		if e.Source != currentAgent {
-			return "", false // an outside event: a new task
+			return "" // an outside event: a new task
 		}
 
 		if e.Type != EventTypeThought {
@@ -99,16 +99,16 @@ func (s AdaptiveCognitiveStrategy) recordedStrategy(inv Invocation) (string, boo
 			continue
 		}
 		if choice.Strategy != "" {
-			return choice.Strategy, true
+			return choice.Strategy
 		}
 	}
-	return "", false
+	return ""
 }
 
-// choose has the selector choose the strategy of the task, the default when it
-// chooses none, and yields the choice. It returns false when the turn ended
-// (an error, yielded, or a stopped stream).
-func (s AdaptiveCognitiveStrategy) choose(
+// chooseStrategy has the selector choose the strategy of the task, the default
+// when it chooses none, and yields the choice. It returns false when the turn
+// ended (an error, yielded, or a stopped stream).
+func (s AdaptiveCognitiveStrategy) chooseStrategy(
 	ctx context.Context,
 	inv Invocation,
 	yield func(StreamUpdate) bool,
@@ -145,11 +145,8 @@ func (s AdaptiveCognitiveStrategy) delegate(
 	}
 
 	for u := range candidate.Strategy.Invoke(ctx, inv) {
-		if !yield(u) {
+		if !yield(u) || u.Err != nil {
 			return
-		}
-		if u.Err != nil {
-			return // the strategy failed: the turn ends with its error
 		}
 	}
 }
