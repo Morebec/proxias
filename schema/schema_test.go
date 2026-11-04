@@ -23,6 +23,7 @@ func TestObjectSchema_Map(t *testing.T) {
 				Integer("minutes", "How long.").Min(1).Max(1440).
 				Bool("done", "Whether it is done.").
 				AnyObject("inputs", "By name.").
+				Property("amount", "number", "").
 				Objects("items", "At least one.", schema.Object().
 					String("id", "Its ID.").Required()),
 			then: map[string]any{
@@ -59,6 +60,9 @@ func TestObjectSchema_Map(t *testing.T) {
 					"inputs": map[string]any{
 						"type":        "object",
 						"description": "By name.",
+					},
+					"amount": map[string]any{
+						"type": "number",
 					},
 					"items": map[string]any{
 						"type":        "array",

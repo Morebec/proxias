@@ -63,6 +63,14 @@ func (s *ObjectSchema) Bool(name, description string) *ObjectSchema {
 	})
 }
 
+// Property adds a property of the JSON type kind ("string", "number",
+// "boolean"...), for a schema written from what is known only at run time.
+func (s *ObjectSchema) Property(name, kind, description string) *ObjectSchema {
+	return s.add(name, description, map[string]any{
+		"type": kind,
+	})
+}
+
 // AnyObject adds a property that is an object of any properties.
 func (s *ObjectSchema) AnyObject(name, description string) *ObjectSchema {
 	return s.add(name, description, map[string]any{
