@@ -625,3 +625,99 @@ func TestLLMCompleteError(t *testing.T) {
 		})
 	}
 }
+
+// mockStreamingClaude is a Messages API that streams the events, and records
+// the request it was sent.
+func mockStreamingClaude(t *testing.T, events string, request *map[string]any) anthropicsdk.Client {
+	t.Helper()
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(request)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(events))
+		}),
+	)
+	t.Cleanup(server.Close)
+	return anthropicsdk.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test"), option.WithMaxRetries(0))
+}
+
+func TestLLMCompleteStreaming(t *testing.T) {
+	tests := []struct {
+		name   string
+		events string
+		then   []proxias.LLMChunk
+	}{
+		{
+			name: "Canonical case: the text is handed out piece by piece, then why Claude stopped",
+			events: "event: message_start\n" +
+				`data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"m","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}` + "\n\n" +
+				"event: content_block_start\n" +
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Betty"}}` + "\n\n" +
+				"event: content_block_stop\n" +
+				`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+				"event: message_delta\n" +
+				`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}` + "\n\n" +
+				"event: message_stop\n" +
+				`data: {"type":"message_stop"}` + "\n\n",
+			then: []proxias.LLMChunk{
+				{
+					Text: "Hello ",
+				},
+				{
+					Text: "Betty",
+				},
+				{
+					StopReason: proxias.StopReasonEndTurn,
+				},
+			},
+		},
+		{
+			name: "GIVEN a tool call, THEN it is handed out whole, once its input is, and Claude did not stop",
+			events: "event: message_start\n" +
+				`data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"m","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}` + "\n\n" +
+				"event: content_block_start\n" +
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"clock","input":{}}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"zone\":"}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"UTC\"}"}}` + "\n\n" +
+				"event: content_block_stop\n" +
+				`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+				"event: message_delta\n" +
+				`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}` + "\n\n" +
+				"event: message_stop\n" +
+				`data: {"type":"message_stop"}` + "\n\n",
+			then: []proxias.LLMChunk{
+				{
+					ToolCall: &proxias.LLMToolCall{
+						ID:   "t1",
+						Name: "clock",
+						Input: map[string]any{
+							"zone": "UTC",
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			llm := anthropic.NewLLM(mockStreamingClaude(t, tt.events, &request), "m")
+			llm.Streaming = true
+
+			var chunks []proxias.LLMChunk
+			for chunk, err := range llm.Complete(context.Background(), proxias.LLMRequest{}) {
+				require.NoError(t, err)
+				chunks = append(chunks, chunk)
+			}
+
+			assert.Equal(t, tt.then, chunks)
+			assert.Equal(t, true, request["stream"])
+		})
+	}
+}

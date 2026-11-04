@@ -25,6 +25,11 @@ type LLM struct {
 	client    openai.Client
 	model     string
 	maxTokens int64
+	// Streaming has Complete stream the answer: its text is handed out as the
+	// model writes it, its tool calls once the answer is whole (a reasoning
+	// the server streams is not handed out). Unset, the answer is read whole,
+	// then handed out.
+	Streaming bool
 }
 
 var _ proxias.LLM = LLM{}
@@ -32,7 +37,7 @@ var _ proxias.LLM = LLM{}
 // NewLLM returns the model of the client as an proxias.LLM: the system prompt
 // is system messages, the conversation is the API's (tool calls in the
 // assistant's messages, their results as tool messages), and the answer is read
-// whole, then handed out as chunks. A model's thinking (another vendor's) is
+// whole, then handed out as chunks (Streaming streams it). A model's thinking (another vendor's) is
 // not given to it: the API takes none.
 func NewLLM(client openai.Client, model string) LLM {
 	return LLM{client: client, model: model, maxTokens: DefaultMaxTokens}
@@ -61,72 +66,140 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			)
 		}
 
-		completion, err := m.client.Chat.Completions.New(ctx, params)
-		if err != nil {
-			yield(proxias.LLMChunk{}, err)
+		if m.Streaming {
+			m.stream(ctx, params, yield)
 			return
 		}
-		if len(completion.Choices) == 0 {
-			return
-		}
-		choice := completion.Choices[0]
-		message := choice.Message
+		m.complete(ctx, params, yield)
+	}
+}
 
-		// An OpenAI-compatible server (DeepSeek, vLLM, Ollama) may send the
-		// model's reasoning: it is its thinking, given before its answer.
-		reasoning, ok := message.JSON.ExtraFields["reasoning_content"]
-		if ok {
-			var thinking string
-			err := json.Unmarshal([]byte(reasoning.Raw()), &thinking)
-			if err == nil && thinking != "" {
-				if !yield(proxias.LLMChunk{Thinking: thinking}, nil) {
-					return
-				}
-			}
-		}
+// complete reads the model's answer whole, then hands it out: its reasoning,
+// its text, its tool calls.
+func (m LLM) complete(
+	ctx context.Context,
+	params openai.ChatCompletionNewParams,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	completion, err := m.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		yield(proxias.LLMChunk{}, err)
+		return
+	}
+	if len(completion.Choices) == 0 {
+		return
+	}
+	choice := completion.Choices[0]
+	message := choice.Message
 
-		if message.Content != "" &&
-			!yield(proxias.LLMChunk{Text: message.Content}, nil) {
-			return
-		}
-		for _, call := range message.ToolCalls {
-			if call.Type != "function" {
-				continue
-			}
-			var input map[string]any
-			if call.Function.Arguments != "" {
-				arguments := []byte(call.Function.Arguments)
-				if err := json.Unmarshal(arguments, &input); err != nil {
-					yield(
-						proxias.LLMChunk{},
-						fmt.Errorf(
-							"openai: the arguments of %s are not "+
-								"a JSON object: %w",
-							call.Function.Name,
-							err,
-						),
-					)
-					return
-				}
-			}
-			if !yield(
-				proxias.LLMChunk{
-					ToolCall: &proxias.LLMToolCall{
-						ID:    call.ID,
-						Name:  call.Function.Name,
-						Input: input,
-					},
-				},
-				nil,
-			) {
+	// An OpenAI-compatible server (DeepSeek, vLLM, Ollama) may send the
+	// model's reasoning: it is its thinking, given before its answer.
+	reasoning, ok := message.JSON.ExtraFields["reasoning_content"]
+	if ok {
+		var thinking string
+		err := json.Unmarshal([]byte(reasoning.Raw()), &thinking)
+		if err == nil && thinking != "" {
+			if !yield(proxias.LLMChunk{Thinking: thinking}, nil) {
 				return
 			}
 		}
-		stop := m.mapStopReason(choice.FinishReason)
-		if stop != "" {
-			yield(proxias.LLMChunk{StopReason: stop}, nil)
+	}
+
+	if message.Content != "" &&
+		!yield(proxias.LLMChunk{Text: message.Content}, nil) {
+		return
+	}
+	if !m.yieldToolCalls(message, yield) {
+		return
+	}
+	stop := m.mapStopReason(choice.FinishReason)
+	if stop != "" {
+		yield(proxias.LLMChunk{StopReason: stop}, nil)
+	}
+}
+
+// stream reads the model's answer as it comes: each piece of its text as it
+// is written, its tool calls once the answer is whole.
+func (m LLM) stream(
+	ctx context.Context,
+	params openai.ChatCompletionNewParams,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	// An OpenAI-compatible server tells the usage of a stream only when it is
+	// asked to.
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
+	}
+	stream := m.client.Chat.Completions.NewStreaming(ctx, params)
+	defer stream.Close()
+
+	var answer openai.ChatCompletionAccumulator
+	for stream.Next() {
+		chunk := stream.Current()
+		answer.AddChunk(chunk)
+		if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
+			continue
+		}
+		if !yield(proxias.LLMChunk{Text: chunk.Choices[0].Delta.Content}, nil) {
+			return
 		}
 	}
+	if err := stream.Err(); err != nil {
+		yield(proxias.LLMChunk{}, err)
+		return
+	}
+	if len(answer.Choices) == 0 {
+		return
+	}
+	choice := answer.Choices[0]
+	if !m.yieldToolCalls(choice.Message, yield) {
+		return
+	}
+	stop := m.mapStopReason(choice.FinishReason)
+	if stop != "" {
+		yield(proxias.LLMChunk{StopReason: stop}, nil)
+	}
+}
+
+// yieldToolCalls hands out the function calls of the message, and returns
+// false when the reader stopped, or the arguments of one are not JSON (its
+// error handed out).
+func (m LLM) yieldToolCalls(
+	message openai.ChatCompletionMessage,
+	yield func(proxias.LLMChunk, error) bool,
+) bool {
+	for _, call := range message.ToolCalls {
+		if call.Type != "function" {
+			continue
+		}
+		var input map[string]any
+		if call.Function.Arguments != "" {
+			arguments := []byte(call.Function.Arguments)
+			if err := json.Unmarshal(arguments, &input); err != nil {
+				yield(
+					proxias.LLMChunk{},
+					fmt.Errorf(
+						"openai: the arguments of %s are not "+
+							"a JSON object: %w",
+						call.Function.Name,
+						err,
+					),
+				)
+				return false
+			}
+		}
+		toolCall := proxias.LLMChunk{
+			ToolCall: &proxias.LLMToolCall{
+				ID:    call.ID,
+				Name:  call.Function.Name,
+				Input: input,
+			},
+		}
+		if !yield(toolCall, nil) {
+			return false
+		}
+	}
+	return true
 }
 
 // mapStopReason maps why the model stopped; it did not when it asks for tool

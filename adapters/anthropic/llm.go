@@ -30,6 +30,10 @@ type LLM struct {
 	// default applies. Its thinking blocks are handed out, and given back
 	// signed as they came.
 	Thinking anthropic.ThinkingConfigParamUnion
+	// Streaming has Complete stream the answer: its text is handed out as
+	// Claude writes it, each of its other blocks (thinking, tool calls) once
+	// it is whole. Unset, the answer is read whole, then handed out.
+	Streaming bool
 }
 
 var _ proxias.LLM = LLM{}
@@ -38,7 +42,7 @@ var _ proxias.LLM = LLM{}
 // is cached (with the tools, which come before it), the conversation is
 // Claude's (tool calls as tool_use blocks, their results as tool_result
 // blocks), and the
-// answer is read whole, then handed out as chunks.
+// answer is read whole, then handed out as chunks (Streaming streams it).
 func NewLLM(client anthropic.Client, model anthropic.Model) LLM {
 	return LLM{
 		client:    client,
@@ -95,53 +99,130 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			)
 		}
 
-		message, err := m.client.Messages.New(ctx, params)
+		if m.Streaming {
+			m.stream(ctx, params, yield)
+			return
+		}
+		m.complete(ctx, params, yield)
+	}
+}
+
+// complete reads Claude's answer whole, then hands out its blocks.
+func (m LLM) complete(
+	ctx context.Context,
+	params anthropic.MessageNewParams,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	message, err := m.client.Messages.New(ctx, params)
+	if err != nil {
+		yield(proxias.LLMChunk{}, err)
+		return
+	}
+	for _, block := range message.Content {
+		chunk, ok, err := m.chunkOf(block)
 		if err != nil {
 			yield(proxias.LLMChunk{}, err)
 			return
 		}
-		for _, block := range message.Content {
-			var chunk proxias.LLMChunk
-			switch b := block.AsAny().(type) {
-			case anthropic.ThinkingBlock:
-				chunk.Thinking, chunk.Signature = b.Thinking, b.Signature
-			case anthropic.RedactedThinkingBlock:
-				chunk.RedactedThinking = b.Data
-			case anthropic.TextBlock:
-				chunk.Text = b.Text
-			case anthropic.ToolUseBlock:
-				var input map[string]any
-				if len(b.Input) > 0 {
-					if err := json.Unmarshal(b.Input, &input); err != nil {
-						yield(
-							proxias.LLMChunk{},
-							fmt.Errorf(
-								"anthropic: the input of %s is not "+
-									"a JSON object: %w",
-								b.Name,
-								err,
-							),
-						)
-						return
-					}
-				}
-				chunk.ToolCall = &proxias.LLMToolCall{
-					ID:    b.ID,
-					Name:  b.Name,
-					Input: input,
-				}
-			default:
+		if !ok {
+			continue
+		}
+		if !yield(chunk, nil) {
+			return
+		}
+	}
+	stop := m.mapStopReason(message.StopReason)
+	if stop != "" {
+		yield(proxias.LLMChunk{StopReason: stop}, nil)
+	}
+}
+
+// stream reads Claude's answer as it comes: each piece of its text as it is
+// written, each other block once it is whole.
+func (m LLM) stream(
+	ctx context.Context,
+	params anthropic.MessageNewParams,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	stream := m.client.Messages.NewStreaming(ctx, params)
+	defer stream.Close()
+
+	var message anthropic.Message
+	for stream.Next() {
+		event := stream.Current()
+		if err := message.Accumulate(event); err != nil {
+			yield(proxias.LLMChunk{}, err)
+			return
+		}
+		switch e := event.AsAny().(type) {
+		case anthropic.ContentBlockDeltaEvent:
+			text := e.Delta.AsAny()
+			delta, isText := text.(anthropic.TextDelta)
+			if !isText || delta.Text == "" {
+				continue
+			}
+			if !yield(proxias.LLMChunk{Text: delta.Text}, nil) {
+				return
+			}
+		case anthropic.ContentBlockStopEvent:
+			block := message.Content[e.Index]
+			if block.Type == "text" {
+				continue // its text is handed out already
+			}
+			chunk, ok, err := m.chunkOf(block)
+			if err != nil {
+				yield(proxias.LLMChunk{}, err)
+				return
+			}
+			if !ok {
 				continue
 			}
 			if !yield(chunk, nil) {
 				return
 			}
 		}
-		stop := m.mapStopReason(message.StopReason)
-		if stop != "" {
-			yield(proxias.LLMChunk{StopReason: stop}, nil)
-		}
 	}
+	if err := stream.Err(); err != nil {
+		yield(proxias.LLMChunk{}, err)
+		return
+	}
+	stop := m.mapStopReason(message.StopReason)
+	if stop != "" {
+		yield(proxias.LLMChunk{StopReason: stop}, nil)
+	}
+}
+
+// chunkOf is a block of Claude's answer as a chunk, and false for a block
+// that is none (an unknown type).
+func (m LLM) chunkOf(block anthropic.ContentBlockUnion) (proxias.LLMChunk, bool, error) {
+	var chunk proxias.LLMChunk
+	switch b := block.AsAny().(type) {
+	case anthropic.ThinkingBlock:
+		chunk.Thinking, chunk.Signature = b.Thinking, b.Signature
+	case anthropic.RedactedThinkingBlock:
+		chunk.RedactedThinking = b.Data
+	case anthropic.TextBlock:
+		chunk.Text = b.Text
+	case anthropic.ToolUseBlock:
+		var input map[string]any
+		if len(b.Input) > 0 {
+			if err := json.Unmarshal(b.Input, &input); err != nil {
+				return proxias.LLMChunk{}, false, fmt.Errorf(
+					"anthropic: the input of %s is not a JSON object: %w",
+					b.Name,
+					err,
+				)
+			}
+		}
+		chunk.ToolCall = &proxias.LLMToolCall{
+			ID:    b.ID,
+			Name:  b.Name,
+			Input: input,
+		}
+	default:
+		return proxias.LLMChunk{}, false, nil
+	}
+	return chunk, true, nil
 }
 
 // mapStopReason maps why Claude stopped; it did not when it asks for tool

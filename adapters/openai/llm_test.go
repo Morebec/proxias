@@ -358,3 +358,76 @@ func TestLLMCompleteError(t *testing.T) {
 		})
 	}
 }
+
+func TestLLMCompleteStreaming(t *testing.T) {
+	tests := []struct {
+		name   string
+		chunks string
+		then   []proxias.LLMChunk
+	}{
+		{
+			name: "Canonical case: the text is handed out piece by piece, then why the model stopped",
+			chunks: `data: {"id":"c","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello "}}]}` + "\n\n" +
+				`data: {"id":"c","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"content":"Betty"},"finish_reason":"stop"}]}` + "\n\n" +
+				"data: [DONE]\n\n",
+			then: []proxias.LLMChunk{
+				{
+					Text: "Hello ",
+				},
+				{
+					Text: "Betty",
+				},
+				{
+					StopReason: proxias.StopReasonEndTurn,
+				},
+			},
+		},
+		{
+			name: "GIVEN a tool call, THEN it is handed out whole, once the answer is, and the model did not stop",
+			chunks: `data: {"id":"c","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"clock","arguments":"{\"zone\":"}}]}}]}` + "\n\n" +
+				`data: {"id":"c","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"UTC\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+				"data: [DONE]\n\n",
+			then: []proxias.LLMChunk{
+				{
+					ToolCall: &proxias.LLMToolCall{
+						ID:   "t1",
+						Name: "clock",
+						Input: map[string]any{
+							"zone": "UTC",
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte(tt.chunks))
+				}),
+			)
+			defer server.Close()
+			client := openaisdk.NewClient(
+				option.WithBaseURL(server.URL),
+				option.WithAPIKey("test"),
+				option.WithMaxRetries(0),
+			)
+			llm := openai.NewLLM(client, "m")
+			llm.Streaming = true
+
+			var chunks []proxias.LLMChunk
+			for c, err := range llm.Complete(context.Background(), proxias.LLMRequest{}) {
+				require.NoError(t, err)
+				chunks = append(chunks, c)
+			}
+
+			assert.Equal(t, tt.then, chunks)
+			assert.Equal(t, true, request["stream"])
+			assert.Equal(t, map[string]any{"include_usage": true}, request["stream_options"])
+		})
+	}
+}
