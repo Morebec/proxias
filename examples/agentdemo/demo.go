@@ -13,12 +13,6 @@ import (
 	"github.com/morebec/proxias"
 )
 
-// devKey is the development key the examples set ANTHROPIC_API_KEY to when it
-// is not set.
-//
-//nolint:lll // a key is one token
-const devKey = "REMOVED-API-KEY"
-
 // ClaudeModel is the model of the examples on Claude: the cheapest.
 const ClaudeModel = "claude-haiku-5-5"
 

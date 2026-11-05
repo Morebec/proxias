@@ -329,19 +329,14 @@ func isPlanRequest(req proxias.LLMRequest) bool {
 }
 
 // Client is the client of Claude of the examples, which Counter counts: its key
-// is ANTHROPIC_API_KEY, set to devKey
-// when it is not.
+// is ANTHROPIC_API_KEY.
 func Client() anthropicsdk.Client {
 	return Env{Counter: &Counter, MaxRetries: -1}.Client()
 }
 
 // Client is the client of Claude of the env, which its counter counts: its key
-// is ANTHROPIC_API_KEY, set to devKey
-// when it is not.
+// is ANTHROPIC_API_KEY.
 func (env Env) Client() anthropicsdk.Client {
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		_ = os.Setenv("ANTHROPIC_API_KEY", devKey)
-	}
 	options := []option.RequestOption{
 		option.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
 	}
