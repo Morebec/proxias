@@ -77,6 +77,15 @@ type SimpleActionExecutor struct {
 	Actions map[string]SimpleAction
 }
 
+// NewSimpleActionExecutor returns the executor of the actions, by their ID.
+func NewSimpleActionExecutor(actions ...SimpleAction) SimpleActionExecutor {
+	byID := make(map[string]SimpleAction, len(actions))
+	for _, action := range actions {
+		byID[action.ID] = action
+	}
+	return SimpleActionExecutor{Actions: byID}
+}
+
 // Descriptors describes the actions, ordered by ID so that what a model is told
 // of them does not change from one turn to the next, allowing prompt caching
 // for
