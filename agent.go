@@ -40,9 +40,7 @@ type Agent struct {
 	ActionExecutor ActionExecutor
 
 	// Memory is the agent's memory beyond a session, nil for none: each turn is
-	// given what it recalls, and the actions it is curated with next to the
-	// agent's;
-	// it memorizes what the turn added.
+	// told what it recalls.
 	Memory MemoryProvider
 
 	// Middleware wrap every turn of the agent, whatever the strategy, the first
@@ -69,31 +67,12 @@ func (a *Agent) Invoke(ctx context.Context, s Session, strategy CognitiveStrateg
 	go func() {
 		defer stream.close()
 		inv := Invocation{Agent: *a, Session: stream.Session()}
-		if a.Memory != nil {
-			executor := a.Memory.ActionExecutor()
-			if executor != nil {
-				inv.Agent.ActionExecutor = actionsWithMemory{
-					actions: a.ActionExecutor,
-					memory:  executor,
-				}
-			}
-		}
-		var added []Event
 		for update := range strategy.Invoke(ctx, inv) {
-			added = append(added, update.Events...)
 			if err := stream.send(ctx, update); err != nil {
 				return
 			}
 			if update.Err != nil {
 				return // the strategy failed: the turn ends with its error
-			}
-		}
-		if a.Memory != nil {
-			if err := a.Memory.Memorize(ctx, inv, added); err != nil {
-				_ = stream.send(
-					ctx,
-					StreamUpdate{Err: fmt.Errorf("memorizing: %w", err)},
-				)
 			}
 		}
 	}()

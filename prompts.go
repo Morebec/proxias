@@ -3,7 +3,7 @@ package proxias
 import (
 	"context"
 	"fmt"
-	"time"
+	"strings"
 )
 
 // DefaultReActPrompt is the system prompt of the ReAct strategy, before who the
@@ -94,11 +94,6 @@ Answer {"strategy":""} when none clearly fits.`
 // a System1StrategySelector asks for, when its ChoiceInstructions is empty.
 const DefaultSystem1StrategyChoiceInstructions = `The state is a conversation of an agent, as the request of a model: who the agent is and its actions, then the messages. Which strategy suits the task its last event asks for?`
 
-// DefaultMarkdownMemoryUpdateDescription is the description of the action of a
-// MarkdownMemory, when its
-// UpdateDescription is empty.
-const DefaultMarkdownMemoryUpdateDescription = `Rewrites your memory: a markdown document you are told at every turn (under "What you remember"), and keep across conversations. Keep it concise and current: facts about the user and their preferences, decisions, what you learned, the scripts or tools you made yourself. Give the whole document: what you leave out is forgotten.`
-
 // unattendedNote is what the premade prompts add when the agent is invoked
 // unattended.
 //
@@ -145,15 +140,13 @@ func NewAgentPrompt(ctx context.Context, inv Invocation) (*Prompt, error) {
 	if agent.Memory == nil {
 		return prompt, nil
 	}
-	memories, err := agent.Memory.Recall(ctx, inv)
+	memory, err := agent.Memory.Recall(ctx, inv)
 	if err != nil {
 		return nil, fmt.Errorf("recalling: %w", err)
 	}
-	if len(memories) != 0 {
-		prompt.AddLine("What you remember: ")
-		for _, m := range memories {
-			prompt.AddLabeledBulletPoint(m.Date.Format(time.DateOnly), m.Text())
-		}
+	if strings.TrimSpace(memory) != "" {
+		prompt.AddLine("What you remember:")
+		prompt.AddLine(memory)
 	}
 
 	return prompt, nil

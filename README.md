@@ -82,11 +82,10 @@ func main() {
   is done. Write your own, or wrap one with an `AgentMiddleware`.
 - **ActionExecutor:** the agent's execution layer: the actions it describes (`ActionDescriptor`, with a JSON Schema of
   their parameters), and their execution. A failed action is a result the model sees, not an error.
-- **MemoryProvider:** the agent's memory beyond a session, which the agent curates itself. `Invoke` gives each turn
-  what it recalls (`Invocation.Memories`), offers the actions it is curated with (its `ActionExecutor`) next to the
-  agent's, and has it memorize what the turn added. Whose memory it is, is the provider's call: from the session, it
-  can tell whom the agent deals with, and keep a memory per person next to a shared one. Message history is not
-  memory: it is the session, which the app keeps.
+- **MemoryProvider:** the agent's memory beyond a session, as it is: `Recall` returns it as a string, which the agent
+  tells in its prompt (`NewAgentPrompt`). How it is kept, and the actions that curate it, are the app's. Whose memory it
+  is, is the provider's call: from the session, it can tell whom the agent deals with. Message history is not memory:
+  it is the session, which the app keeps.
 - **LLM and System1Model:** the two model interfaces the strategies use. An `LLM` answers a request (`LLMRequest`, built
   from a session with `NewLLMRequestFromSession`) with text, thinking and tool calls. A `System1Model` answers questions
   about a state with calibrated probabilities (a choice, a score, a noul), as a fast discriminative model does.
@@ -114,8 +113,8 @@ func main() {
   - `transports/agenthttp`: an agent over HTTP, its updates streamed;
   - `transports/openaihttp`: agents as models of an OpenAI-compatible Chat Completions API;
   - `transports/agentprotocolhttp`: an agent over Agent Protocol.
-- **Memory:** `MarkdownMemory`, a MEMORY.md the agent curates: told whole at every turn, rewritten with its
-  `update_memory` action. Any other kind (per person, retrieval...) is a `MemoryProvider` of the app's.
+- **Memory:** `MarkdownMemory`, a MEMORY.md told whole at every turn (the agent-cli example rewrites it with an action
+  of its own). Any other kind (per person, retrieval...) is a `MemoryProvider` of the app's.
 - **Actions:** `SimpleActionExecutor`, actions as Go functions.
 
 ## Examples

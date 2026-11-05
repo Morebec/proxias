@@ -16,8 +16,8 @@
 //	go run ./examples/agent-cli -vendor openai
 //
 // It curates its own memory, across runs: MEMORY.md in its workspace, which it
-// is told at every turn and rewrites
-// with its update_memory action.
+// is told at every turn (a proxias.MarkdownMemory) and rewrites with its
+// update_memory action.
 //
 //	> what time is it?
 //	> the demo is on friday
@@ -85,6 +85,8 @@ func main() {
 		}
 		return filepath.Join(dir, p)
 	}
+	// memoryPath is the agent's memory, which it rewrites with update_memory.
+	memoryPath := filepath.Join(dir, "MEMORY.md")
 	agent := &proxias.Agent{
 		ID: "cleo",
 		AgentPersona: proxias.AgentPersona{
@@ -95,7 +97,7 @@ func main() {
 				"give yourself the capabilities you lack",
 			},
 		},
-		Memory: proxias.MarkdownMemory{Path: filepath.Join(dir, "MEMORY.md")},
+		Memory: proxias.MarkdownMemory{Path: memoryPath},
 		ActionExecutor: proxias.SimpleActionExecutor{
 			Actions: map[string]proxias.SimpleAction{
 				"get_current_time": {
@@ -114,6 +116,43 @@ func main() {
 							Data: map[string]any{
 								"now": time.Now().Format(time.RFC1123),
 							},
+						}, nil
+					},
+				},
+				"update_memory": {
+					ActionDescriptor: proxias.ActionDescriptor{
+						ID: "update_memory",
+						Description: "Rewrites your memory: a markdown " +
+							"document you are told at every turn (under " +
+							"\"What you remember\"), and keep across " +
+							"conversations. Keep it concise and current: " +
+							"facts about the user and their preferences, " +
+							"decisions, what you learned, the scripts you " +
+							"made yourself. Give the whole document: what " +
+							"you leave out is forgotten.",
+						InputSchema: schema.Object().
+							String("content", "the whole new document, in markdown").
+							Required().
+							Map(),
+					},
+					RunFn: func(
+						_ context.Context,
+						_ proxias.Session,
+						params map[string]any,
+					) (proxias.ActionExecutionResult, error) {
+						content := fmt.Sprint(params["content"])
+						err := os.WriteFile(memoryPath, []byte(content), 0o600)
+						if err != nil {
+							//nolint:nilerr // its result says why
+							return proxias.ActionExecutionResult{
+								ActionID: "update_memory",
+								Status:   "failed",
+								Data:     map[string]any{"error": err.Error()},
+							}, nil
+						}
+						return proxias.ActionExecutionResult{
+							ActionID: "update_memory",
+							Status:   "completed",
 						}, nil
 					},
 				},

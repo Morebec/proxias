@@ -255,9 +255,9 @@ func TestReActStrategyRequest(t *testing.T) {
 		given []proxias.Event
 		// prompt is the strategy's SystemPrompt, told the first system prompt.
 		prompt, told string
-		// memories are what the agent's memory recalls; system the system
+		// memory is what the agent's memory recalls; system the system
 		// prompt after the strategy's own and who the agent is.
-		memories []proxias.Event
+		memory   string
 		system   []string
 		messages string
 	}{
@@ -276,11 +276,9 @@ func TestReActStrategyRequest(t *testing.T) {
 			messages: `[{"role":"user","content":[{"type":"text","text":"hi"}]}]`,
 		},
 		{
-			name: "GIVEN memories THEN they are in who the agent is, before the session's instructions",
-			told: proxias.DefaultReActPrompt,
-			memories: []proxias.Event{
-				proxias.NewMessageEvent(proxias.NewUserSource("john"), "the demo is on friday"),
-			},
+			name:   "GIVEN memories THEN they are in who the agent is, before the session's instructions",
+			told:   proxias.DefaultReActPrompt,
+			memory: "the demo is on friday",
 			given: []proxias.Event{
 				{
 					Type:    proxias.EventTypeMessage,
@@ -445,10 +443,10 @@ func TestReActStrategyRequest(t *testing.T) {
 					},
 				},
 			}
-			if tt.memories != nil {
-				agent.Memory = memory{
-					recall: func(proxias.Invocation) ([]proxias.Event, error) { return tt.memories, nil },
-				}
+			if tt.memory != "" {
+				agent.Memory = memory(func(proxias.Invocation) (string, error) {
+					return tt.memory, nil
+				})
 			}
 
 			strategy := proxias.NewReActStrategy(llm)
@@ -471,9 +469,7 @@ func TestReActStrategyRequest(t *testing.T) {
 			agentPrompt, err := proxias.NewAgentPrompt(context.Background(), inv)
 			require.NoError(t, err)
 			assert.Equal(t, agentPrompt.String(), system[1].Text, "then who the agent is")
-			for _, m := range tt.memories {
-				assert.Contains(t, system[1].Text, m.Text(), "who the agent is says what it remembers")
-			}
+			assert.Contains(t, system[1].Text, tt.memory, "who the agent is says what it remembers")
 			instructions := make([]string, 0, len(system)-2)
 			for _, block := range system[2:] {
 				instructions = append(instructions, block.Text)
