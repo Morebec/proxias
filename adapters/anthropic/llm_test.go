@@ -679,6 +679,40 @@ func TestLLMCompleteStreaming(t *testing.T) {
 			},
 		},
 		{
+			name: "GIVEN thinking, THEN it is handed out piece by piece as Claude writes it, then whole and signed",
+			events: "event: message_start\n" +
+				`data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"m","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}` + "\n\n" +
+				"event: content_block_start\n" +
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants "}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"the time."}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig1"}}` + "\n\n" +
+				"event: content_block_stop\n" +
+				`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+				"event: message_delta\n" +
+				`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}` + "\n\n" +
+				"event: message_stop\n" +
+				`data: {"type":"message_stop"}` + "\n\n",
+			then: []proxias.LLMChunk{
+				{
+					ThinkingDelta: "The user wants ",
+				},
+				{
+					ThinkingDelta: "the time.",
+				},
+				{
+					Thinking:  "The user wants the time.",
+					Signature: "sig1",
+				},
+				{
+					StopReason: proxias.StopReasonEndTurn,
+				},
+			},
+		},
+		{
 			name: "GIVEN a tool call, THEN it is handed out whole, once its input is, and Claude did not stop",
 			events: "event: message_start\n" +
 				`data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"m","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}` + "\n\n" +

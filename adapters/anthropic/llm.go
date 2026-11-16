@@ -37,8 +37,9 @@ type LLM struct {
 	// signed as they came.
 	Thinking anthropic.ThinkingConfigParamUnion
 	// Buffered has Complete read the answer whole, then hand it out, instead
-	// of streaming it: by default its text is handed out as Claude writes it,
-	// each of its other blocks (thinking, tool calls) once it is whole.
+	// of streaming it: by default its text and its thinking are handed out as
+	// Claude writes them, each of its other blocks (thinking, tool calls) once
+	// it is whole.
 	Buffered bool
 }
 
@@ -146,8 +147,8 @@ func (m LLM) complete(
 	}
 }
 
-// stream reads Claude's answer as it comes: each piece of its text as it is
-// written, each other block once it is whole.
+// stream reads Claude's answer as it comes: each piece of its text and of its
+// thinking as it is written, each other block once it is whole.
 func (m LLM) stream(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
@@ -165,12 +166,11 @@ func (m LLM) stream(
 		}
 		switch e := event.AsAny().(type) {
 		case anthropic.ContentBlockDeltaEvent:
-			text := e.Delta.AsAny()
-			delta, isText := text.(anthropic.TextDelta)
-			if !isText || delta.Text == "" {
+			chunk, ok := m.deltaChunkOf(e.Delta)
+			if !ok {
 				continue
 			}
-			if !yield(proxias.LLMChunk{Text: delta.Text}, nil) {
+			if !yield(chunk, nil) {
 				return
 			}
 		case anthropic.ContentBlockStopEvent:
@@ -199,6 +199,19 @@ func (m LLM) stream(
 	if stop != "" {
 		yield(proxias.LLMChunk{StopReason: stop}, nil)
 	}
+}
+
+// deltaChunkOf is a piece of Claude's answer as a chunk: a piece of its text, or
+// of its thinking (shown as it is written; the whole block, signed, follows);
+// false for a piece that is none (empty, or of a tool call's input).
+func (m LLM) deltaChunkOf(delta anthropic.RawContentBlockDeltaUnion) (proxias.LLMChunk, bool) {
+	switch d := delta.AsAny().(type) {
+	case anthropic.TextDelta:
+		return proxias.LLMChunk{Text: d.Text}, d.Text != ""
+	case anthropic.ThinkingDelta:
+		return proxias.LLMChunk{ThinkingDelta: d.Thinking}, d.Thinking != ""
+	}
+	return proxias.LLMChunk{}, false
 }
 
 // chunkOf is a block of Claude's answer as a chunk, and false for a block

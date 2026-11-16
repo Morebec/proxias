@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -486,4 +487,61 @@ func TestReActStrategyRequest(t *testing.T) {
 			)
 		})
 	}
+}
+
+// chunkedLLM is an LLM that streams the chunks given, whatever it is asked.
+type chunkedLLM []proxias.LLMChunk
+
+func (l chunkedLLM) Complete(context.Context, proxias.LLMRequest) iter.Seq2[proxias.LLMChunk, error] {
+	return func(yield func(proxias.LLMChunk, error) bool) {
+		for _, chunk := range l {
+			if !yield(chunk, nil) {
+				return
+			}
+		}
+	}
+}
+
+func TestReActStrategyStreamsThinking(t *testing.T) {
+	// Given
+	llm := chunkedLLM{
+		{ThinkingDelta: "The user "},
+		{ThinkingDelta: "greets."},
+		{Thinking: "The user greets.", Signature: "sig1"},
+		{Text: "Hello John."},
+		{StopReason: proxias.StopReasonEndTurn},
+	}
+	inv := proxias.Invocation{
+		Agent:   proxias.Agent{ID: "ada"},
+		Session: proxias.NewSession(proxias.NewMessageEvent(proxias.NewUserSource("john"), "hi")),
+	}
+
+	// When
+	var (
+		chunks []proxias.StreamChunk
+		events []string
+	)
+	for u := range proxias.NewReActStrategy(llm).Invoke(context.Background(), inv) {
+		require.NoError(t, u.Err)
+		if u.Chunk != nil {
+			chunks = append(chunks, *u.Chunk)
+		}
+		for _, e := range u.Events {
+			events = append(events, string(e.Type)+" "+e.Text())
+		}
+	}
+
+	// Then
+	require.Len(t, chunks, 3)
+	assert.Equal(t, "The user ", string(chunks[0].Data))
+	assert.True(t, chunks[0].Thinking, "a piece of thinking")
+	assert.Equal(t, "greets.", string(chunks[1].Data))
+	assert.True(t, chunks[1].Thinking, "a piece of thinking")
+	assert.Equal(t, "Hello John.", string(chunks[2].Data))
+	assert.False(t, chunks[2].Thinking, "a piece of the text")
+	assert.Equal(t, chunks[0].EventID, chunks[2].EventID, "the pieces of the same answer")
+	assert.Equal(t, []string{
+		`cognition.thought {"Text":"","ToolCall":null,"Thinking":"The user greets.","Signature":"sig1","RedactedThinking":""}`,
+		"message Hello John.",
+	}, events)
 }

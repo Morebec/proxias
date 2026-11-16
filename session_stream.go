@@ -128,4 +128,8 @@ type StreamChunk struct {
 	// EventID is the event the chunk is a piece of.
 	EventID EventID
 	Data    []byte
+	// Thinking tells that the chunk is a piece of the model's thinking as it
+	// writes it, before the event, rather than of the event's text: it is only
+	// to be shown, the thinking is kept whole with the event.
+	Thinking bool
 }
