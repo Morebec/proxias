@@ -100,7 +100,8 @@ func (s ReActCognitiveStrategy) reason(
 	return s.handleResponse(currentAgent, response, yield)
 }
 
-// handleResponse streams the model's answer, its text as it comes, gathers it
+// handleResponse streams the model's answer, its thinking and its text as they
+// come, gathers it
 // into one message, and yields the events it is (NewEventsFromLLMMessage),
 // with the model's stop reason as it is. It returns the requests and the
 // events, ending with the requests', or no request when the turn ended.
@@ -127,6 +128,18 @@ func (s ReActCognitiveStrategy) handleResponse(
 
 		case chunk.StopReason != "":
 			stop = chunk.StopReason
+
+		case chunk.ThinkingDelta != "":
+			update := StreamUpdate{
+				Chunk: &StreamChunk{
+					EventID:  message.ID,
+					Data:     []byte(chunk.ThinkingDelta),
+					Thinking: true,
+				},
+			}
+			if !yield(update) {
+				return nil, nil
+			}
 
 		case chunk.isThinking():
 			thinking := LLMPart{

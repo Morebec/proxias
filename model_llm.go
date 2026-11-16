@@ -77,14 +77,16 @@ type LLMToolResult struct {
 	Content string
 }
 
-// LLMChunk is a piece of what an LLM streams: a piece of text, a whole tool
-// call, or a whole block of thinking (Thinking and its Signature, or
-// RedactedThinking), which is to be given back as it came. When the model
+// LLMChunk is a piece of what an LLM streams: a piece of text, a piece of
+// thinking as the model writes it (ThinkingDelta, only to be shown: the whole
+// block follows), a whole tool call, or a whole block of thinking (Thinking and
+// its Signature, or RedactedThinking), which is to be given back as it came. When the model
 // stopped (it did not ask for tool calls), the last chunk says why
 // (StopReason),
 // and only that.
 type LLMChunk struct {
 	Text             string
+	ThinkingDelta    string `json:",omitempty"`
 	ToolCall         *LLMToolCall
 	Thinking         string
 	Signature        string
