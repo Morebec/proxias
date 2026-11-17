@@ -40,7 +40,33 @@ type LLMRequest struct {
 
 	// Tools are the actions the model may call, with their JSON Schemas.
 	Tools []ActionDescriptor
+
+	// Model is the model to ask, overriding the LLM's own when set: a vendor's
+	// name for it (claude-haiku-5-5, gpt-5-mini).
+	Model string
+
+	// Effort is how much the model spends on its answer, its thinking
+	// included, overriding the LLM's own when set.
+	Effort Effort
 }
+
+// Effort is how much a model spends on an answer, its thinking included: from
+// EffortLow, for quick calls (a choice, a classification), to EffortMax, for
+// long work. Empty is the model's default.
+type Effort string
+
+const (
+	// EffortLow is the least a model spends.
+	EffortLow Effort = "low"
+	// EffortMedium is a balance of cost and depth.
+	EffortMedium Effort = "medium"
+	// EffortHigh is for hard work.
+	EffortHigh Effort = "high"
+	// EffortXHigh is more than high, where a model has it.
+	EffortXHigh Effort = "xhigh"
+	// EffortMax is the most a model spends.
+	EffortMax Effort = "max"
+)
 
 // LLMMessage is a message of a conversation with a model.
 type LLMMessage struct {

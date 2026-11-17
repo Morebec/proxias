@@ -25,6 +25,10 @@ type LLM struct {
 	client    openai.Client
 	model     string
 	maxTokens int64
+	// Effort is how much a reasoning model reasons before it answers: the
+	// model's default when empty. A request's own Effort overrides it. Leave
+	// both empty for a model that does not reason, which may refuse it.
+	Effort proxias.Effort
 	// Buffered has Complete read the answer whole, then hand it out, instead
 	// of streaming it: by default its text is handed out as the model writes
 	// it, its tool calls once the answer is whole (a reasoning the server
@@ -49,9 +53,10 @@ func NewLLM(client openai.Client, model string) LLM {
 func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[proxias.LLMChunk, error] {
 	return func(yield func(proxias.LLMChunk, error) bool) {
 		params := openai.ChatCompletionNewParams{
-			Model:               m.model,
+			Model:               m.modelOf(req),
 			MaxCompletionTokens: openai.Int(m.maxTokens),
 			Messages:            m.messages(req.Messages),
+			ReasoningEffort:     shared.ReasoningEffort(m.effortOf(req)),
 		}
 		for _, tool := range req.Tools {
 			params.Tools = append(
@@ -72,6 +77,22 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 		m.stream(ctx, params, yield)
 	}
+}
+
+// modelOf is the request's model, or the LLM's when it names none.
+func (m LLM) modelOf(req proxias.LLMRequest) string {
+	if req.Model != "" {
+		return req.Model
+	}
+	return m.model
+}
+
+// effortOf is the request's effort, or the LLM's when it names none.
+func (m LLM) effortOf(req proxias.LLMRequest) proxias.Effort {
+	if req.Effort != "" {
+		return req.Effort
+	}
+	return m.Effort
 }
 
 // complete reads the model's answer whole, then hands it out: its reasoning,
