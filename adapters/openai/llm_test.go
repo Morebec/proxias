@@ -9,6 +9,7 @@ import (
 
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -431,6 +432,65 @@ func TestLLMCompleteStreaming(t *testing.T) {
 			assert.Equal(t, tt.then, chunks)
 			assert.Equal(t, true, request["stream"])
 			assert.Equal(t, map[string]any{"include_usage": true}, request["stream_options"])
+		})
+	}
+}
+
+func TestLLMCompleteReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name  string
+		given shared.ReasoningEffort
+		then  any
+	}{
+		{
+			name:  "canonical",
+			given: shared.ReasoningEffortLow,
+			then:  "low",
+		},
+		{
+			name:  "GIVEN no effort THEN the request names none, the model's default applies",
+			given: "",
+			then:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write(
+						[]byte(
+							`{"id":"c","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Hi."}}]}`,
+						),
+					)
+				}),
+			)
+			defer server.Close()
+			client := openaisdk.NewClient(
+				option.WithBaseURL(server.URL),
+				option.WithAPIKey("test"),
+				option.WithMaxRetries(0),
+			)
+			llm := openai.NewLLM(client, "m")
+			llm.Buffered = true
+			llm.ReasoningEffort = tt.given
+
+			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role: proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{
+							{Text: "Hi"},
+						},
+					},
+				},
+			}) {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.then, request["reasoning_effort"])
 		})
 	}
 }

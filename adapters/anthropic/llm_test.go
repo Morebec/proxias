@@ -790,3 +790,48 @@ func TestLLMCompleteCachesAndBounds(t *testing.T) {
 	system := request["system"].([]any)[0].(map[string]any)
 	assert.Equal(t, map[string]any{"type": "ephemeral", "ttl": "1h"}, system["cache_control"], "the instructions are cached an hour")
 }
+
+func TestLLMCompleteEffort(t *testing.T) {
+	tests := []struct {
+		name  string
+		given anthropicsdk.OutputConfigEffort
+		then  any
+	}{
+		{
+			name:  "canonical",
+			given: anthropicsdk.OutputConfigEffortLow,
+			then: map[string]any{
+				"effort": "low",
+			},
+		},
+		{
+			name:  "GIVEN no effort THEN the request names none, the model's default applies",
+			given: "",
+			then:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			client := mockClaude(t, http.StatusOK, `{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"Hi."}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, &request)
+			llm := anthropic.NewLLM(client, "m")
+			llm.Buffered = true
+			llm.Effort = tt.given
+
+			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role: proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{
+							{Text: "Hi"},
+						},
+					},
+				},
+			}) {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.then, request["output_config"])
+		})
+	}
+}

@@ -25,6 +25,11 @@ type LLM struct {
 	client    openai.Client
 	model     string
 	maxTokens int64
+	// ReasoningEffort is how much a reasoning model reasons before it answers
+	// (shared.ReasoningEffortLow to shared.ReasoningEffortHigh): the model's
+	// default when empty. Leave it empty for a model that does not reason,
+	// which may refuse it.
+	ReasoningEffort shared.ReasoningEffort
 	// Buffered has Complete read the answer whole, then hand it out, instead
 	// of streaming it: by default its text is handed out as the model writes
 	// it, its tool calls once the answer is whole (a reasoning the server
@@ -52,6 +57,7 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			Model:               m.model,
 			MaxCompletionTokens: openai.Int(m.maxTokens),
 			Messages:            m.messages(req.Messages),
+			ReasoningEffort:     m.ReasoningEffort,
 		}
 		for _, tool := range req.Tools {
 			params.Tools = append(

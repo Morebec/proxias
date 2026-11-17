@@ -36,6 +36,11 @@ type LLM struct {
 	// default applies. Its thinking blocks are handed out, and given back
 	// signed as they came.
 	Thinking anthropic.ThinkingConfigParamUnion
+	// Effort is how much Claude spends on an answer, its thinking included
+	// (anthropic.OutputConfigEffortLow to anthropic.OutputConfigEffortMax):
+	// the model's default when empty. Low suits quick calls (a choice, a
+	// classification), high and above long work.
+	Effort anthropic.OutputConfigEffort
 	// Buffered has Complete read the answer whole, then hand it out, instead
 	// of streaming it: by default its text and its thinking are handed out as
 	// Claude writes them, each of its other blocks (thinking, tool calls) once
@@ -84,11 +89,14 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 
 		params := anthropic.MessageNewParams{
-			Model:        m.model,
-			MaxTokens:    m.MaxTokens,
-			System:       system,
-			Messages:     m.mapMessages(req.Messages[instructions:], len(req.Tools) > 0),
-			Thinking:     m.Thinking,
+			Model:     m.model,
+			MaxTokens: m.MaxTokens,
+			System:    system,
+			Messages:  m.mapMessages(req.Messages[instructions:], len(req.Tools) > 0),
+			Thinking:  m.Thinking,
+			OutputConfig: anthropic.OutputConfigParam{
+				Effort: m.Effort,
+			},
 			CacheControl: anthropic.NewCacheControlEphemeralParam(),
 		}
 		if len(params.System) > 0 {
