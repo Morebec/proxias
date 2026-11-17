@@ -9,7 +9,6 @@ import (
 
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -436,20 +435,29 @@ func TestLLMCompleteStreaming(t *testing.T) {
 	}
 }
 
-func TestLLMCompleteReasoningEffort(t *testing.T) {
+func TestLLMCompleteEffort(t *testing.T) {
 	tests := []struct {
 		name  string
-		given shared.ReasoningEffort
+		given proxias.Effort
+		when  proxias.Effort
 		then  any
 	}{
 		{
 			name:  "canonical",
-			given: shared.ReasoningEffortLow,
+			given: proxias.EffortLow,
+			when:  "",
 			then:  "low",
 		},
 		{
-			name:  "GIVEN no effort THEN the request names none, the model's default applies",
+			name:  "GIVEN an effort WHEN the request names another THEN the request's applies",
+			given: proxias.EffortLow,
+			when:  proxias.EffortHigh,
+			then:  "high",
+		},
+		{
+			name:  "GIVEN no effort WHEN the request names none THEN the model's default applies",
 			given: "",
+			when:  "",
 			then:  nil,
 		},
 	}
@@ -475,7 +483,7 @@ func TestLLMCompleteReasoningEffort(t *testing.T) {
 			)
 			llm := openai.NewLLM(client, "m")
 			llm.Buffered = true
-			llm.ReasoningEffort = tt.given
+			llm.Effort = tt.given
 
 			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
 				Messages: []proxias.LLMMessage{
@@ -486,11 +494,71 @@ func TestLLMCompleteReasoningEffort(t *testing.T) {
 						},
 					},
 				},
+				Effort: tt.when,
 			}) {
 				require.NoError(t, err)
 			}
 
 			assert.Equal(t, tt.then, request["reasoning_effort"])
+		})
+	}
+}
+
+func TestLLMCompleteModel(t *testing.T) {
+	tests := []struct {
+		name string
+		when string
+		then any
+	}{
+		{
+			name: "canonical",
+			when: "",
+			then: "gpt-5",
+		},
+		{
+			name: "WHEN the request names a model THEN it is asked",
+			when: "gpt-5-mini",
+			then: "gpt-5-mini",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write(
+						[]byte(
+							`{"id":"c","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Hi."}}]}`,
+						),
+					)
+				}),
+			)
+			defer server.Close()
+			client := openaisdk.NewClient(
+				option.WithBaseURL(server.URL),
+				option.WithAPIKey("test"),
+				option.WithMaxRetries(0),
+			)
+			llm := openai.NewLLM(client, "gpt-5")
+			llm.Buffered = true
+
+			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role: proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{
+							{Text: "Hi"},
+						},
+					},
+				},
+				Model: tt.when,
+			}) {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.then, request["model"])
 		})
 	}
 }

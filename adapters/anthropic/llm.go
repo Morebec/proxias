@@ -36,11 +36,10 @@ type LLM struct {
 	// default applies. Its thinking blocks are handed out, and given back
 	// signed as they came.
 	Thinking anthropic.ThinkingConfigParamUnion
-	// Effort is how much Claude spends on an answer, its thinking included
-	// (anthropic.OutputConfigEffortLow to anthropic.OutputConfigEffortMax):
-	// the model's default when empty. Low suits quick calls (a choice, a
-	// classification), high and above long work.
-	Effort anthropic.OutputConfigEffort
+	// Effort is how much Claude spends on an answer, its thinking included:
+	// the model's default when empty. A request's own Effort overrides it.
+	// Models before Claude 4.6 refuse it.
+	Effort proxias.Effort
 	// Buffered has Complete read the answer whole, then hand it out, instead
 	// of streaming it: by default its text and its thinking are handed out as
 	// Claude writes them, each of its other blocks (thinking, tool calls) once
@@ -89,13 +88,13 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 
 		params := anthropic.MessageNewParams{
-			Model:     m.model,
+			Model:     m.modelOf(req),
 			MaxTokens: m.MaxTokens,
 			System:    system,
 			Messages:  m.mapMessages(req.Messages[instructions:], len(req.Tools) > 0),
 			Thinking:  m.Thinking,
 			OutputConfig: anthropic.OutputConfigParam{
-				Effort: m.Effort,
+				Effort: anthropic.OutputConfigEffort(m.effortOf(req)),
 			},
 			CacheControl: anthropic.NewCacheControlEphemeralParam(),
 		}
@@ -123,6 +122,22 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 		m.stream(ctx, params, yield)
 	}
+}
+
+// modelOf is the request's model, or the LLM's when it names none.
+func (m LLM) modelOf(req proxias.LLMRequest) anthropic.Model {
+	if req.Model != "" {
+		return req.Model
+	}
+	return m.model
+}
+
+// effortOf is the request's effort, or the LLM's when it names none.
+func (m LLM) effortOf(req proxias.LLMRequest) proxias.Effort {
+	if req.Effort != "" {
+		return req.Effort
+	}
+	return m.Effort
 }
 
 // complete reads Claude's answer whole, then hands out its blocks.

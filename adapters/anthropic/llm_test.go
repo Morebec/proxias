@@ -794,19 +794,30 @@ func TestLLMCompleteCachesAndBounds(t *testing.T) {
 func TestLLMCompleteEffort(t *testing.T) {
 	tests := []struct {
 		name  string
-		given anthropicsdk.OutputConfigEffort
+		given proxias.Effort
+		when  proxias.Effort
 		then  any
 	}{
 		{
 			name:  "canonical",
-			given: anthropicsdk.OutputConfigEffortLow,
+			given: proxias.EffortLow,
+			when:  "",
 			then: map[string]any{
 				"effort": "low",
 			},
 		},
 		{
-			name:  "GIVEN no effort THEN the request names none, the model's default applies",
+			name:  "GIVEN an effort WHEN the request names another THEN the request's applies",
+			given: proxias.EffortLow,
+			when:  proxias.EffortMax,
+			then: map[string]any{
+				"effort": "max",
+			},
+		},
+		{
+			name:  "GIVEN no effort WHEN the request names none THEN the model's default applies",
 			given: "",
+			when:  "",
 			then:  nil,
 		},
 	}
@@ -827,11 +838,55 @@ func TestLLMCompleteEffort(t *testing.T) {
 						},
 					},
 				},
+				Effort: tt.when,
 			}) {
 				require.NoError(t, err)
 			}
 
 			assert.Equal(t, tt.then, request["output_config"])
+		})
+	}
+}
+
+func TestLLMCompleteModel(t *testing.T) {
+	tests := []struct {
+		name string
+		when string
+		then any
+	}{
+		{
+			name: "canonical",
+			when: "",
+			then: "claude-sonnet-5-5",
+		},
+		{
+			name: "WHEN the request names a model THEN it is asked",
+			when: "claude-haiku-5-5",
+			then: "claude-haiku-5-5",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			client := mockClaude(t, http.StatusOK, `{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"Hi."}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, &request)
+			llm := anthropic.NewLLM(client, "claude-sonnet-5-5")
+			llm.Buffered = true
+
+			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role: proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{
+							{Text: "Hi"},
+						},
+					},
+				},
+				Model: tt.when,
+			}) {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.then, request["model"])
 		})
 	}
 }
