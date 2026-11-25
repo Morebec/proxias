@@ -83,7 +83,7 @@ func main() {
 - **ActionExecutor:** the agent's execution layer: the actions it describes (`ActionDescriptor`, with a JSON Schema of
   their parameters), and their execution. A failed action is a result the model sees, not an error. A `Deferred` action
   is listed by name and description only, and its schema loaded when the model needs it: the LLM adapter decides how
-  (Claude's tool search in `adapters/anthropic`).
+  (Claude's tool search in `adapters/anthropic`; in `adapters/openai`, `describe_actions` and `run_action`).
 - **MemoryProvider:** the agent's memory beyond a session, as it is: `Recall` returns it as a string, which the agent
   tells in its prompt (`NewAgentPrompt`). How it is kept, and the actions that curate it, are the app's. Whose memory it
   is, is the provider's call: from the session, it can tell whom the agent deals with. Message history is not memory:

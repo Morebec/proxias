@@ -52,13 +52,18 @@ func NewLLM(client openai.Client, model string) LLM {
 // they are (errors.As an *openai.Error).
 func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[proxias.LLMChunk, error] {
 	return func(yield func(proxias.LLMChunk, error) bool) {
+		loaded, deferred := splitDeferred(req.Tools)
+		conversation := req.Messages
+		if len(deferred) > 0 {
+			conversation = withIndex(conversation, deferred.index(req.Tools))
+		}
 		params := openai.ChatCompletionNewParams{
 			Model:               m.modelOf(req),
 			MaxCompletionTokens: openai.Int(m.maxTokens),
-			Messages:            m.messages(req.Messages),
+			Messages:            m.messages(conversation, deferred),
 			ReasoningEffort:     shared.ReasoningEffort(m.effortOf(req)),
 		}
-		for _, tool := range req.Tools {
+		for _, tool := range loaded {
 			params.Tools = append(
 				params.Tools,
 				openai.ChatCompletionFunctionTool(
@@ -70,13 +75,104 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 				),
 			)
 		}
-
-		if m.Buffered {
-			m.complete(ctx, params, yield)
+		if len(deferred) == 0 {
+			m.ask(ctx, params, yield)
 			return
 		}
-		m.stream(ctx, params, yield)
+		params.Tools = append(params.Tools, deferred.tools()...)
+		m.askWithDeferred(ctx, params, conversation, deferred, yield)
 	}
+}
+
+// ask asks the model once, streamed unless Buffered.
+func (m LLM) ask(
+	ctx context.Context,
+	params openai.ChatCompletionNewParams,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	if m.Buffered {
+		m.complete(ctx, params, yield)
+		return
+	}
+	m.stream(ctx, params, yield)
+}
+
+// askWithDeferred asks the model, answers its describe_actions calls itself
+// (handed out as opaque blocks, so that the session keeps them), and asks it
+// again with the schemas, until it acts or answers; its run_action calls are
+// handed out as the calls of their actions.
+func (m LLM) askWithDeferred(
+	ctx context.Context,
+	params openai.ChatCompletionNewParams,
+	conversation []proxias.LLMMessage,
+	deferred deferredActions,
+	yield func(proxias.LLMChunk, error) bool,
+) {
+	for round := 0; ; round++ {
+		var (
+			answer    []proxias.LLMPart
+			text      strings.Builder
+			acted     bool
+			described bool
+			stopped   bool
+		)
+		m.ask(ctx, params, func(chunk proxias.LLMChunk, err error) bool {
+			if err != nil {
+				stopped = true
+				return yield(chunk, err)
+			}
+			switch {
+			case chunk.ToolCall != nil && chunk.ToolCall.Name == describeActionsName:
+				names := namesOf(chunk.ToolCall.Input)
+				exchange := describedActions{
+					CallID: chunk.ToolCall.ID,
+					Names:  names,
+					Answer: deferred.describe(names),
+				}
+				chunk = proxias.LLMChunk{Opaque: exchange.opaque()}
+				answer = append(answer, proxias.LLMPart{Opaque: chunk.Opaque})
+				described = true
+			case chunk.ToolCall != nil && chunk.ToolCall.Name == runActionName:
+				chunk.ToolCall = actionCallOf(chunk.ToolCall)
+				acted = true
+			case chunk.ToolCall != nil:
+				acted = true
+			case chunk.Text != "":
+				text.WriteString(chunk.Text)
+			}
+			if !yield(chunk, nil) {
+				stopped = true
+				return false
+			}
+			return true
+		})
+		if stopped || !described || acted || round+1 >= maxDescribeRounds {
+			return
+		}
+
+		said := proxias.LLMPart{Text: text.String()}
+		conversation = append(slices.Clip(conversation), proxias.LLMMessage{
+			Role:  proxias.LLMMessageRoleAssistant,
+			Parts: append([]proxias.LLMPart{said}, answer...),
+		})
+		params.Messages = m.messages(conversation, deferred)
+	}
+}
+
+// withIndex is the conversation with the index of the deferred actions after
+// its opening system messages, the instructions.
+func withIndex(conversation []proxias.LLMMessage, index string) []proxias.LLMMessage {
+	instructions := 0
+	for instructions < len(conversation) && conversation[instructions].Role == proxias.LLMMessageRoleSystem {
+		instructions++
+	}
+	indexed := make([]proxias.LLMMessage, 0, len(conversation)+1)
+	indexed = append(indexed, conversation[:instructions]...)
+	indexed = append(indexed, proxias.LLMMessage{
+		Role:  proxias.LLMMessageRoleSystem,
+		Parts: []proxias.LLMPart{{Text: index}},
+	})
+	return append(indexed, conversation[instructions:]...)
 }
 
 // modelOf is the request's model, or the LLM's when it names none.
@@ -242,7 +338,10 @@ func (m LLM) mapStopReason(finishReason string) proxias.StopReason {
 // tool messages, and the assistant's text and tool calls as its messages.
 // Thinking
 // parts are left out, and empty texts.
-func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletionMessageParamUnion {
+func (m LLM) messages(
+	conversation []proxias.LLMMessage,
+	deferred deferredActions,
+) []openai.ChatCompletionMessageParamUnion {
 	// Consecutive messages of the assistant are one: the API wants its tool
 	// calls in one message, before their results.
 	var merged []proxias.LLMMessage
@@ -279,8 +378,22 @@ func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletion
 				text      []string
 				reasoning []string
 				toolCalls []openai.ChatCompletionMessageToolCallUnionParam
+				answers   []openai.ChatCompletionMessageParamUnion
 			)
 			for _, part := range message.Parts {
+				if part.ToolCall != nil {
+					if _, ok := deferred[part.ToolCall.Name]; ok {
+						part.ToolCall = runActionCallOf(part.ToolCall)
+					}
+				}
+				if exchange, ok := describedActionsFrom(part.Opaque); ok {
+					part.ToolCall = &proxias.LLMToolCall{
+						ID:    exchange.CallID,
+						Name:  describeActionsName,
+						Input: map[string]any{"names": exchange.Names},
+					}
+					answers = append(answers, openai.ToolMessage(exchange.Answer, exchange.CallID))
+				}
 				switch {
 				case part.Signature != "" || part.RedactedThinking != "":
 					// Another vendor's thinking (Claude's): meaningless here.
@@ -335,6 +448,7 @@ func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletion
 				params,
 				openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant},
 			)
+			params = append(params, answers...)
 			continue
 		}
 		var text []string
