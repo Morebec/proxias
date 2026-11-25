@@ -78,6 +78,36 @@ func TestNewMessageEvent(t *testing.T) {
 	assert.Equal(t, proxias.EventTypeMessage, e.Type)
 	assert.Equal(t, proxias.NewUserSource("john"), e.Source)
 	assert.Equal(t, "hello", e.Text())
+	assert.Empty(t, e.Files)
+}
+
+func TestNewMessageEventWithFiles(t *testing.T) {
+	// Given
+	photo := proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}
+
+	// When
+	e := proxias.NewMessageEvent(proxias.NewUserSource("john"), "look", photo)
+
+	// Then
+	assert.Equal(t, "look", e.Text())
+	assert.Equal(t, []proxias.File{photo}, e.Files)
+}
+
+func TestNewActionExecutionResultEventWithFiles(t *testing.T) {
+	// Given
+	photo := proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}
+
+	// When
+	e, err := proxias.NewActionExecutionResultEvent(proxias.NewSystemSource("actions"), proxias.ActionExecutionResult{
+		ActionID: "read_file",
+		Status:   "completed",
+		Files:    []proxias.File{photo},
+	})
+
+	// Then
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"action_id":"read_file","status":"completed"}`, e.Text())
+	assert.Equal(t, []proxias.File{photo}, e.Files)
 }
 
 func TestNewActionEvents(t *testing.T) {

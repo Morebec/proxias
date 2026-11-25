@@ -77,12 +77,12 @@ type LLMMessage struct {
 	Parts []LLMPart
 }
 
-// LLMPart is a part of a message: text, a tool call, a tool's result, or the
-// model's thinking (Thinking and its Signature, or RedactedThinking), given
-// back
-// as the model gave it.
+// LLMPart is a part of a message: text, a file, a tool call, a tool's result,
+// or the model's thinking (Thinking and its Signature, or RedactedThinking),
+// given back as the model gave it.
 type LLMPart struct {
 	Text             string
+	File             *File
 	ToolCall         *LLMToolCall
 	ToolResult       *LLMToolResult
 	Thinking         string
@@ -101,6 +101,8 @@ type LLMToolCall struct {
 type LLMToolResult struct {
 	CallID  string
 	Content string
+	// Files is the files the action gives the model to read, after Content.
+	Files []File
 }
 
 // LLMChunk is a piece of what an LLM streams: a piece of text, a piece of
@@ -244,6 +246,7 @@ func newLLMMessageFromActionResultEvent(e Event) LLMMessage {
 				ToolResult: &LLMToolResult{
 					CallID:  string(e.CausationID),
 					Content: e.Text(),
+					Files:   e.Files,
 				},
 			},
 		},
@@ -274,19 +277,24 @@ func newLLMMessageFromMessageEvent(currentAgentSource EventSource, e Event) LLMM
 
 	if e.HasSourceType(EventSourceTypeUser) {
 		return LLMMessage{
-			Role: LLMMessageRoleUser,
-			Parts: []LLMPart{
-				{Text: e.Text()},
-			},
+			Role:  LLMMessageRoleUser,
+			Parts: withFileParts([]LLMPart{{Text: e.Text()}}, e.Files),
 		}
 	}
 
 	return LLMMessage{
-		Role: LLMMessageRoleUser,
-		Parts: []LLMPart{
-			{Text: externalTextPayload(e)},
-		},
+		Role:  LLMMessageRoleUser,
+		Parts: withFileParts([]LLMPart{{Text: externalTextPayload(e)}}, e.Files),
 	}
+}
+
+// withFileParts returns the parts followed by one part per file. Only the
+// user's messages hold files: models read files only from the user.
+func withFileParts(parts []LLMPart, files []File) []LLMPart {
+	for i := range files {
+		parts = append(parts, LLMPart{File: &files[i]})
+	}
+	return parts
 }
 
 // newLLMMessageFromUnknownEvent: an event of another type (a system's

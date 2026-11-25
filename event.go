@@ -92,7 +92,17 @@ type Event struct {
 	Type        EventType
 	Source      EventSource
 	Payload     []byte
-	Date        time.Time
+	// Files is the files a message holds, nil for none.
+	Files []File
+	Date  time.Time
+}
+
+// File is a file a message holds: a picture, a document... What a model reads
+// of it is its adapter's choice, by its media type.
+type File struct {
+	Name      string
+	MediaType string
+	Content   []byte
 }
 
 // NewEvent returns an event of a new ID, dated now.
@@ -106,9 +116,13 @@ func NewEvent(t EventType, source EventSource, payload []byte) Event {
 	}
 }
 
-// NewMessageEvent returns a message of the source.
-func NewMessageEvent(source EventSource, text string) Event {
-	return NewEvent(EventTypeMessage, source, []byte(text))
+// NewMessageEvent returns a message of the source, holding the files.
+func NewMessageEvent(source EventSource, text string, files ...File) Event {
+	e := NewEvent(EventTypeMessage, source, []byte(text))
+	if len(files) > 0 {
+		e.Files = files
+	}
+	return e
 }
 
 // NewActionExecutionRequestEvent returns the event of the request, of the
@@ -130,7 +144,11 @@ func NewActionExecutionResultEvent(source EventSource, res ActionExecutionResult
 		return Event{}, fmt.Errorf("the data of %s is not JSON: %w", res.ActionID, err)
 	}
 
-	return NewEvent(EventTypeActionResult, source, payload), nil
+	e := NewEvent(EventTypeActionResult, source, payload)
+	if len(res.Files) > 0 {
+		e.Files = res.Files
+	}
+	return e, nil
 }
 
 // NewThoughtEvent returns the event of the model's thinking, of the source,

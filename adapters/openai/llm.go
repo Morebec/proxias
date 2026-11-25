@@ -5,6 +5,7 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -337,24 +338,102 @@ func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletion
 			)
 			continue
 		}
-		var text []string
+		var (
+			text  []string
+			parts []openai.ChatCompletionContentPartUnionParam
+		)
+		// flush adds the user's message of the text and files so far: its text
+		// alone when it holds no file, as the API always took it.
+		flush := func() {
+			switch {
+			case len(parts) > 0:
+				params = append(params, openai.UserMessage(parts))
+			case len(text) > 0:
+				params = append(params, openai.UserMessage(strings.Join(text, "\n\n")))
+			}
+			text, parts = nil, nil
+		}
+		// resultFiles are the files of the tool results, in a user message after
+		// them: a tool message holds only text.
+		var resultFiles []openai.ChatCompletionContentPartUnionParam
 		for _, part := range message.Parts {
 			switch {
 			case part.ToolResult != nil:
-				if len(text) > 0 {
-					params = append(params, openai.UserMessage(strings.Join(text, "\n\n")))
-					text = nil
-				}
+				flush()
 				params = append(params, openai.ToolMessage(part.ToolResult.Content, part.ToolResult.CallID))
+				if len(part.ToolResult.Files) > 0 {
+					resultFiles = append(resultFiles, openai.TextContentPart(
+						fmt.Sprintf("[files of the result of %s]", part.ToolResult.CallID)))
+				}
+				for _, file := range part.ToolResult.Files {
+					resultFiles = append(resultFiles, m.fileParts(file)...)
+				}
+			case part.File != nil:
+				if len(parts) == 0 {
+					for _, t := range text {
+						parts = append(parts, openai.TextContentPart(t))
+					}
+				}
+				parts = append(parts, m.fileParts(*part.File)...)
+			case part.Text != "" && len(parts) > 0:
+				parts = append(parts, openai.TextContentPart(part.Text))
 			case part.Text != "":
 				text = append(text, part.Text)
 			}
 		}
-		if len(text) > 0 {
-			params = append(params, openai.UserMessage(strings.Join(text, "\n\n")))
+		flush()
+		if len(resultFiles) > 0 {
+			params = append(params, openai.UserMessage(resultFiles))
 		}
 	}
 	return params
+}
+
+// fileParts is a file as the model reads it, after its name: an image, a PDF
+// file, text, or only its name when the API takes no file of its type.
+func (m LLM) fileParts(file proxias.File) []openai.ChatCompletionContentPartUnionParam {
+	named := fmt.Sprintf("[file %s, %s]", file.Name, file.MediaType)
+	dataURL := "data:" + file.MediaType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)
+	switch {
+	case isImage(file.MediaType):
+		return []openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart(named),
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
+		}
+	case file.MediaType == pdfMediaType:
+		return []openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart(named),
+			openai.FileContentPart(openai.ChatCompletionContentPartFileFileParam{
+				FileData: openai.String(dataURL),
+				Filename: openai.String(file.Name),
+			}),
+		}
+	case isText(file.MediaType):
+		return []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(named + "\n" + string(file.Content))}
+	}
+	return []openai.ChatCompletionContentPartUnionParam{
+		openai.TextContentPart(fmt.Sprintf("[file %s, %s, which you cannot open]", file.Name, file.MediaType)),
+	}
+}
+
+const pdfMediaType = "application/pdf"
+
+// isImage tells whether a file of the media type is an image the API takes.
+func isImage(mediaType string) bool {
+	switch mediaType {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	}
+	return false
+}
+
+// isText tells whether a file of the media type is text, read as it is.
+func isText(mediaType string) bool {
+	switch mediaType {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml":
+		return true
+	}
+	return strings.HasPrefix(mediaType, "text/")
 }
 
 // parameters is a JSON Schema of an object as a function's parameters: an

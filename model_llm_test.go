@@ -29,6 +29,21 @@ func TestNewLLMMessage(t *testing.T) {
 			},
 		},
 		{
+			name: "GIVEN a person's message with files THEN its files follow its text",
+			given: proxias.NewMessageEvent(
+				proxias.NewUserSource("john"),
+				"look",
+				proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")},
+			),
+			then: proxias.LLMMessage{
+				Role: proxias.LLMMessageRoleUser,
+				Parts: []proxias.LLMPart{
+					{Text: "look"},
+					{File: &proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+				},
+			},
+		},
+		{
 			name: "GIVEN the agent's action request THEN it is the assistant's tool call",
 			given: proxias.Event{
 				ID:     "toolu_1",
@@ -121,6 +136,28 @@ func TestNewLLMMessage(t *testing.T) {
 						ToolResult: &proxias.LLMToolResult{
 							CallID:  "toolu_1",
 							Content: `{"status":"completed"}`,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "GIVEN an action result with files THEN the tool's result holds them",
+			given: proxias.Event{
+				Type:        proxias.EventTypeActionResult,
+				Source:      proxias.NewSystemSource("actions"),
+				CausationID: "toolu_1",
+				Payload:     []byte(`{"status":"completed"}`),
+				Files:       []proxias.File{{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+			},
+			then: proxias.LLMMessage{
+				Role: proxias.LLMMessageRoleTool,
+				Parts: []proxias.LLMPart{
+					{
+						ToolResult: &proxias.LLMToolResult{
+							CallID:  "toolu_1",
+							Content: `{"status":"completed"}`,
+							Files:   []proxias.File{{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
 						},
 					},
 				},

@@ -64,6 +64,67 @@ func TestLLMComplete(t *testing.T) {
 			]`,
 		},
 		{
+			name:   "GIVEN files THEN each is named, then given as Claude reads it: an image, a PDF document, text, or only its name",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":"ok"}]}`,
+			when: proxias.LLMRequest{Messages: []proxias.LLMMessage{
+				{Role: proxias.LLMMessageRoleUser, Parts: []proxias.LLMPart{
+					{Text: "look"},
+					{File: &proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+					{File: &proxias.File{Name: "quote.pdf", MediaType: "application/pdf", Content: []byte("pdf")}},
+					{File: &proxias.File{Name: "notes.csv", MediaType: "text/csv", Content: []byte("a,b")}},
+					{File: &proxias.File{Name: "plan.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Content: []byte("docx")}},
+				}},
+			}},
+			then: []proxias.LLMChunk{{Text: "ok"}, {StopReason: proxias.StopReasonEndTurn}},
+			messages: `[
+				{"role":"user","content":[
+					{"type":"text","text":"look"},
+					{"type":"text","text":"[file photo.png, image/png]"},
+					{"type":"image","source":{"type":"base64","media_type":"image/png","data":"cG5n"}},
+					{"type":"text","text":"[file quote.pdf, application/pdf]"},
+					{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"cGRm"}},
+					{"type":"text","text":"[file notes.csv, text/csv]\na,b"},
+					{"type":"text","text":"[file plan.docx, application/vnd.openxmlformats-officedocument.wordprocessingml.document, which you cannot open]"}
+				]}
+			]`,
+		},
+		{
+			name:   "GIVEN a tool's result with files THEN they follow its text in the tool_result block",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":"ok"}]}`,
+			when: proxias.LLMRequest{
+				Tools: []proxias.ActionDescriptor{{ID: "read_file"}},
+				Messages: []proxias.LLMMessage{
+					{Role: proxias.LLMMessageRoleUser, Parts: []proxias.LLMPart{{Text: "look"}}},
+					{Role: proxias.LLMMessageRoleAssistant, Parts: []proxias.LLMPart{
+						{ToolCall: &proxias.LLMToolCall{ID: "toolu_1", Name: "read_file"}},
+					}},
+					{Role: proxias.LLMMessageRoleTool, Parts: []proxias.LLMPart{
+						{ToolResult: &proxias.LLMToolResult{
+							CallID:  "toolu_1",
+							Content: "completed",
+							Files: []proxias.File{
+								{Name: "photo.png", MediaType: "image/png", Content: []byte("png")},
+								{Name: "plan.docx", MediaType: "application/msword", Content: []byte("doc")},
+							},
+						}},
+					}},
+				},
+			},
+			then: []proxias.LLMChunk{{Text: "ok"}, {StopReason: proxias.StopReasonEndTurn}},
+			messages: `[
+				{"role":"user","content":[{"type":"text","text":"look"}]},
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"read_file","input":{}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":[
+					{"type":"text","text":"completed"},
+					{"type":"text","text":"[file photo.png, image/png]"},
+					{"type":"image","source":{"type":"base64","media_type":"image/png","data":"cG5n"}},
+					{"type":"text","text":"[file plan.docx, application/msword, which you cannot open]"}
+				]}]}
+			]`,
+		},
+		{
 			name:   "GIVEN thinking configured THEN it is requested, and the thinking blocks are handed out first",
 			status: http.StatusOK,
 			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"tool_use","usage":{},
