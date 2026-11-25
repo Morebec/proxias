@@ -28,6 +28,7 @@ type LLM struct {
 	// cached: Claude's default (5 minutes) when empty, or
 	// anthropic.CacheControlEphemeralTTLTTL1h for instructions that every
 	// conversation shares and that a person may come back to after a pause.
+	// Unused when Uncached.
 	InstructionsTTL anthropic.CacheControlEphemeralTTL
 	// Thinking configures Claude's thinking, sent as is when set: for example
 	// adaptive thinking that returns a summary of it, {OfAdaptive:
@@ -53,10 +54,10 @@ type LLM struct {
 
 var _ proxias.LLM = LLM{}
 
-// NewLLM returns the model of the client as an proxias.LLM: the tools are
-// cached, then the system prompt, each at its own breakpoint, and so is the
-// conversation so far (its automatic breakpoint moves to its end at every call, so the
-// turns of a loop read it from the cache); the conversation is Claude's (tool
+// NewLLM returns the model of the client as an proxias.LLM: unless Uncached,
+// the tools are cached, then the system prompt, each at its own breakpoint,
+// and so is the conversation so far (its automatic breakpoint moves to its end
+// at every call, so the turns of a loop read it from the cache); the conversation is Claude's (tool
 // calls as tool_use blocks, their results as tool_result blocks), and the
 // answer is streamed (Buffered reads it whole).
 func NewLLM(client anthropic.Client, model anthropic.Model) LLM {

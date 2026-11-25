@@ -764,14 +764,31 @@ func TestLLMCompleteCachePoints(t *testing.T) {
 		system       any
 		conversation any
 	}
+	someMessages := []proxias.LLMMessage{
+		{
+			Role:  proxias.LLMMessageRoleSystem,
+			Parts: []proxias.LLMPart{{Text: "Be brief."}},
+		},
+		{
+			Role:  proxias.LLMMessageRoleUser,
+			Parts: []proxias.LLMPart{{Text: "Hi"}},
+		},
+	}
+	someTools := []proxias.ActionDescriptor{{ID: "a"}, {ID: "b"}}
+
 	tests := []struct {
 		name  string
 		given func(llm *anthropic.LLM)
+		when  proxias.LLMRequest
 		then  expect
 	}{
 		{
 			name:  "canonical",
 			given: func(*anthropic.LLM) {},
+			when: proxias.LLMRequest{
+				Messages: someMessages,
+				Tools:    someTools,
+			},
 			then: expect{
 				tool:         map[string]any{"type": "ephemeral"},
 				system:       map[string]any{"type": "ephemeral"},
@@ -782,6 +799,10 @@ func TestLLMCompleteCachePoints(t *testing.T) {
 			name: "GIVEN an hour for the instructions THEN the tools and the system prompt are cached an hour, the conversation 5 minutes",
 			given: func(llm *anthropic.LLM) {
 				llm.InstructionsTTL = anthropicsdk.CacheControlEphemeralTTLTTL1h
+			},
+			when: proxias.LLMRequest{
+				Messages: someMessages,
+				Tools:    someTools,
 			},
 			then: expect{
 				tool:         map[string]any{"type": "ephemeral", "ttl": "1h"},
@@ -795,6 +816,31 @@ func TestLLMCompleteCachePoints(t *testing.T) {
 				llm.InstructionsTTL = anthropicsdk.CacheControlEphemeralTTLTTL1h
 				llm.Uncached = true
 			},
+			when: proxias.LLMRequest{
+				Messages: someMessages,
+				Tools:    someTools,
+			},
+		},
+		{
+			name:  "GIVEN no tools THEN the system prompt and the conversation are cached",
+			given: func(*anthropic.LLM) {},
+			when:  proxias.LLMRequest{Messages: someMessages},
+			then: expect{
+				system:       map[string]any{"type": "ephemeral"},
+				conversation: map[string]any{"type": "ephemeral"},
+			},
+		},
+		{
+			name:  "GIVEN no system prompt THEN the tools and the conversation are cached",
+			given: func(*anthropic.LLM) {},
+			when: proxias.LLMRequest{
+				Messages: someMessages[1:],
+				Tools:    someTools,
+			},
+			then: expect{
+				tool:         map[string]any{"type": "ephemeral"},
+				conversation: map[string]any{"type": "ephemeral"},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -805,30 +851,28 @@ func TestLLMCompleteCachePoints(t *testing.T) {
 			llm.Buffered = true
 			tt.given(&llm)
 
-			for _, err := range llm.Complete(context.Background(), proxias.LLMRequest{
-				Messages: []proxias.LLMMessage{
-					{
-						Role:  proxias.LLMMessageRoleSystem,
-						Parts: []proxias.LLMPart{{Text: "Be brief."}},
-					},
-					{
-						Role:  proxias.LLMMessageRoleUser,
-						Parts: []proxias.LLMPart{{Text: "Hi"}},
-					},
-				},
-				Tools: []proxias.ActionDescriptor{{ID: "a"}, {ID: "b"}},
-			}) {
+			for _, err := range llm.Complete(context.Background(), tt.when) {
 				require.NoError(t, err)
 			}
 
-			tools := request["tools"].([]any)
-			system := request["system"].([]any)[0].(map[string]any)
-			assert.Nil(t, tools[0].(map[string]any)["cache_control"], "only the last tool is a breakpoint")
-			assert.Equal(t, tt.then.tool, tools[1].(map[string]any)["cache_control"])
-			assert.Equal(t, tt.then.system, system["cache_control"])
+			assert.Equal(t, tt.then.tool, cacheControlOfLast(request["tools"]))
+			assert.Equal(t, tt.then.system, cacheControlOfLast(request["system"]))
 			assert.Equal(t, tt.then.conversation, request["cache_control"])
+			if tools, ok := request["tools"].([]any); ok {
+				assert.Nil(t, tools[0].(map[string]any)["cache_control"], "only the last tool is a breakpoint")
+			}
 		})
 	}
+}
+
+// cacheControlOfLast is the cache_control of the last block of the tools or
+// the system prompt of a request, nil when there is none.
+func cacheControlOfLast(blocks any) any {
+	list, ok := blocks.([]any)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	return list[len(list)-1].(map[string]any)["cache_control"]
 }
 
 func TestLLMCompleteBounds(t *testing.T) {
