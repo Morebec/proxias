@@ -101,6 +101,8 @@ type LLMToolCall struct {
 type LLMToolResult struct {
 	CallID  string
 	Content string
+	// Files is the files the action gives the model to read, after Content.
+	Files []File
 }
 
 // LLMChunk is a piece of what an LLM streams: a piece of text, a piece of
@@ -244,6 +246,7 @@ func newLLMMessageFromActionResultEvent(e Event) LLMMessage {
 				ToolResult: &LLMToolResult{
 					CallID:  string(e.CausationID),
 					Content: e.Text(),
+					Files:   e.Files,
 				},
 			},
 		},

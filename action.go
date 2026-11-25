@@ -46,6 +46,9 @@ type ActionExecutionResult struct {
 	Status string `json:"status"`
 	// Data is the output of the action, or why it failed.
 	Data map[string]any `json:"data,omitempty"`
+	// Files is the files the action gives the model to read (a picture it
+	// opened...), nil for none. They are not part of the result's JSON.
+	Files []File `json:"-"`
 }
 
 // ActionExecutor is the agent's execution layer: it describes the actions the

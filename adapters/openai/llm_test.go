@@ -66,6 +66,42 @@ func TestLLMComplete(t *testing.T) {
 			]`,
 		},
 		{
+			name:   "GIVEN a tool's result with files THEN the tool message is its text, and a user message after the results holds the files",
+			answer: `{"role":"assistant","content":"ok"}`,
+			when: proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{Role: proxias.LLMMessageRoleUser, Parts: []proxias.LLMPart{{Text: "look"}}},
+					{Role: proxias.LLMMessageRoleAssistant, Parts: []proxias.LLMPart{
+						{ToolCall: &proxias.LLMToolCall{ID: "call_1", Name: "read_file"}},
+						{ToolCall: &proxias.LLMToolCall{ID: "call_2", Name: "get_time"}},
+					}},
+					{Role: proxias.LLMMessageRoleTool, Parts: []proxias.LLMPart{
+						{ToolResult: &proxias.LLMToolResult{
+							CallID:  "call_1",
+							Content: "completed",
+							Files:   []proxias.File{{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+						}},
+						{ToolResult: &proxias.LLMToolResult{CallID: "call_2", Content: "noon"}},
+					}},
+				},
+			},
+			then: []proxias.LLMChunk{{Text: "ok"}, {StopReason: proxias.StopReasonEndTurn}},
+			messages: `[
+				{"role":"user","content":"look"},
+				{"role":"assistant","tool_calls":[
+					{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}},
+					{"id":"call_2","type":"function","function":{"name":"get_time","arguments":"{}"}}
+				]},
+				{"role":"tool","tool_call_id":"call_1","content":"completed"},
+				{"role":"tool","tool_call_id":"call_2","content":"noon"},
+				{"role":"user","content":[
+					{"type":"text","text":"[files of the result of call_1]"},
+					{"type":"text","text":"[file photo.png, image/png]"},
+					{"type":"image_url","image_url":{"url":"data:image/png;base64,cG5n"}}
+				]}
+			]`,
+		},
+		{
 			name:   "GIVEN the assistant's thinking THEN its own is given back as reasoning_content, another vendor's, signed, left out",
 			answer: `{"role":"assistant","content":"ok"}`,
 			when: proxias.LLMRequest{Messages: []proxias.LLMMessage{

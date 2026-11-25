@@ -347,7 +347,7 @@ func (m LLM) mapMessages(conversation []proxias.LLMMessage, hasTools bool) []ant
 					// The API refuses a tool_result block without tools.
 					continue
 				}
-				add(role, anthropic.NewToolResultBlock(part.ToolResult.CallID, part.ToolResult.Content, false))
+				add(role, m.toolResultBlock(*part.ToolResult))
 			case part.File != nil:
 				for _, block := range m.fileBlocks(*part.File) {
 					add(role, block)
@@ -366,6 +366,26 @@ func (m LLM) mapMessages(conversation []proxias.LLMMessage, hasTools bool) []ant
 		add(anthropic.MessageParamRoleUser, anthropic.NewTextBlock("[no new event]"))
 	}
 	return params
+}
+
+// toolResultBlock is a tool's result: its text, then its files.
+func (m LLM) toolResultBlock(result proxias.LLMToolResult) anthropic.ContentBlockParamUnion {
+	block := anthropic.NewToolResultBlock(result.CallID, result.Content, false)
+	for _, file := range result.Files {
+		for _, fileBlock := range m.fileBlocks(file) {
+			var content anthropic.ToolResultBlockParamContentUnion
+			switch {
+			case fileBlock.OfImage != nil:
+				content.OfImage = fileBlock.OfImage
+			case fileBlock.OfDocument != nil:
+				content.OfDocument = fileBlock.OfDocument
+			default:
+				content.OfText = fileBlock.OfText
+			}
+			block.OfToolResult.Content = append(block.OfToolResult.Content, content)
+		}
+	}
+	return block
 }
 
 // fileBlocks is a file as Claude reads it, after its name: an image, a PDF

@@ -142,6 +142,28 @@ func TestNewLLMMessage(t *testing.T) {
 			},
 		},
 		{
+			name: "GIVEN an action result with files THEN the tool's result holds them",
+			given: proxias.Event{
+				Type:        proxias.EventTypeActionResult,
+				Source:      proxias.NewSystemSource("actions"),
+				CausationID: "toolu_1",
+				Payload:     []byte(`{"status":"completed"}`),
+				Files:       []proxias.File{{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+			},
+			then: proxias.LLMMessage{
+				Role: proxias.LLMMessageRoleTool,
+				Parts: []proxias.LLMPart{
+					{
+						ToolResult: &proxias.LLMToolResult{
+							CallID:  "toolu_1",
+							Content: `{"status":"completed"}`,
+							Files:   []proxias.File{{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "GIVEN a person's message THEN it is the user's text",
 			given: proxias.Event{
 				Type:    proxias.EventTypeMessage,

@@ -353,11 +353,21 @@ func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletion
 			}
 			text, parts = nil, nil
 		}
+		// resultFiles are the files of the tool results, in a user message after
+		// them: a tool message holds only text.
+		var resultFiles []openai.ChatCompletionContentPartUnionParam
 		for _, part := range message.Parts {
 			switch {
 			case part.ToolResult != nil:
 				flush()
 				params = append(params, openai.ToolMessage(part.ToolResult.Content, part.ToolResult.CallID))
+				if len(part.ToolResult.Files) > 0 {
+					resultFiles = append(resultFiles, openai.TextContentPart(
+						fmt.Sprintf("[files of the result of %s]", part.ToolResult.CallID)))
+				}
+				for _, file := range part.ToolResult.Files {
+					resultFiles = append(resultFiles, m.fileParts(file)...)
+				}
 			case part.File != nil:
 				if len(parts) == 0 {
 					for _, t := range text {
@@ -372,6 +382,9 @@ func (m LLM) messages(conversation []proxias.LLMMessage) []openai.ChatCompletion
 			}
 		}
 		flush()
+		if len(resultFiles) > 0 {
+			params = append(params, openai.UserMessage(resultFiles))
+		}
 	}
 	return params
 }

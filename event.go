@@ -144,7 +144,11 @@ func NewActionExecutionResultEvent(source EventSource, res ActionExecutionResult
 		return Event{}, fmt.Errorf("the data of %s is not JSON: %w", res.ActionID, err)
 	}
 
-	return NewEvent(EventTypeActionResult, source, payload), nil
+	e := NewEvent(EventTypeActionResult, source, payload)
+	if len(res.Files) > 0 {
+		e.Files = res.Files
+	}
+	return e, nil
 }
 
 // NewThoughtEvent returns the event of the model's thinking, of the source,
