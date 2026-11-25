@@ -41,6 +41,31 @@ func TestLLMComplete(t *testing.T) {
 			messages: `[{"role":"user","content":"hello"}]`,
 		},
 		{
+			name:   "GIVEN files THEN each is named, then given as the model reads it: an image, a PDF file, text, or only its name",
+			answer: `{"role":"assistant","content":"ok"}`,
+			when: proxias.LLMRequest{Messages: []proxias.LLMMessage{
+				{Role: proxias.LLMMessageRoleUser, Parts: []proxias.LLMPart{
+					{Text: "look"},
+					{File: &proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+					{File: &proxias.File{Name: "quote.pdf", MediaType: "application/pdf", Content: []byte("pdf")}},
+					{File: &proxias.File{Name: "notes.csv", MediaType: "text/csv", Content: []byte("a,b")}},
+					{File: &proxias.File{Name: "plan.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Content: []byte("docx")}},
+				}},
+			}},
+			then: []proxias.LLMChunk{{Text: "ok"}, {StopReason: proxias.StopReasonEndTurn}},
+			messages: `[
+				{"role":"user","content":[
+					{"type":"text","text":"look"},
+					{"type":"text","text":"[file photo.png, image/png]"},
+					{"type":"image_url","image_url":{"url":"data:image/png;base64,cG5n"}},
+					{"type":"text","text":"[file quote.pdf, application/pdf]"},
+					{"type":"file","file":{"file_data":"data:application/pdf;base64,cGRm","filename":"quote.pdf"}},
+					{"type":"text","text":"[file notes.csv, text/csv]\na,b"},
+					{"type":"text","text":"[file plan.docx, application/vnd.openxmlformats-officedocument.wordprocessingml.document, which you cannot open]"}
+				]}
+			]`,
+		},
+		{
 			name:   "GIVEN the assistant's thinking THEN its own is given back as reasoning_content, another vendor's, signed, left out",
 			answer: `{"role":"assistant","content":"ok"}`,
 			when: proxias.LLMRequest{Messages: []proxias.LLMMessage{

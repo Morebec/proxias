@@ -6,9 +6,11 @@ package anthropic
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -346,6 +348,10 @@ func (m LLM) mapMessages(conversation []proxias.LLMMessage, hasTools bool) []ant
 					continue
 				}
 				add(role, anthropic.NewToolResultBlock(part.ToolResult.CallID, part.ToolResult.Content, false))
+			case part.File != nil:
+				for _, block := range m.fileBlocks(*part.File) {
+					add(role, block)
+				}
 			case part.Text != "" && message.Role == proxias.LLMMessageRoleSystem:
 				add(role, anthropic.NewTextBlock("[system] "+part.Text))
 			case part.Text != "":
@@ -360,6 +366,51 @@ func (m LLM) mapMessages(conversation []proxias.LLMMessage, hasTools bool) []ant
 		add(anthropic.MessageParamRoleUser, anthropic.NewTextBlock("[no new event]"))
 	}
 	return params
+}
+
+// fileBlocks is a file as Claude reads it, after its name: an image, a PDF
+// document, text, or only its name when Claude cannot read its type.
+func (m LLM) fileBlocks(file proxias.File) []anthropic.ContentBlockParamUnion {
+	named := fmt.Sprintf("[file %s, %s]", file.Name, file.MediaType)
+	switch {
+	case isImage(file.MediaType):
+		return []anthropic.ContentBlockParamUnion{
+			anthropic.NewTextBlock(named),
+			anthropic.NewImageBlockBase64(file.MediaType, base64.StdEncoding.EncodeToString(file.Content)),
+		}
+	case file.MediaType == pdfMediaType:
+		return []anthropic.ContentBlockParamUnion{
+			anthropic.NewTextBlock(named),
+			anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: base64.StdEncoding.EncodeToString(file.Content),
+			}),
+		}
+	case isText(file.MediaType):
+		return []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(named + "\n" + string(file.Content))}
+	}
+	return []anthropic.ContentBlockParamUnion{
+		anthropic.NewTextBlock(fmt.Sprintf("[file %s, %s, which you cannot open]", file.Name, file.MediaType)),
+	}
+}
+
+const pdfMediaType = "application/pdf"
+
+// isImage tells whether a file of the media type is an image Claude sees.
+func isImage(mediaType string) bool {
+	switch mediaType {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	}
+	return false
+}
+
+// isText tells whether a file of the media type is text, read as it is.
+func isText(mediaType string) bool {
+	switch mediaType {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml":
+		return true
+	}
+	return strings.HasPrefix(mediaType, "text/")
 }
 
 // answeredTurn is the messages, first to end (excluded), of the assistant turn

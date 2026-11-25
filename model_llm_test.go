@@ -29,6 +29,21 @@ func TestNewLLMMessage(t *testing.T) {
 			},
 		},
 		{
+			name: "GIVEN a person's message with files THEN its files follow its text",
+			given: proxias.NewMessageEvent(
+				proxias.NewUserSource("john"),
+				"look",
+				proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")},
+			),
+			then: proxias.LLMMessage{
+				Role: proxias.LLMMessageRoleUser,
+				Parts: []proxias.LLMPart{
+					{Text: "look"},
+					{File: &proxias.File{Name: "photo.png", MediaType: "image/png", Content: []byte("png")}},
+				},
+			},
+		},
+		{
 			name: "GIVEN the agent's action request THEN it is the assistant's tool call",
 			given: proxias.Event{
 				ID:     "toolu_1",

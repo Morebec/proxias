@@ -74,6 +74,8 @@ func main() {
   what wraps each of its turns (`Middleware`). It holds no session: one agent serves any number of them.
 - **Session and events:** a session is the immutable trace of an agent's experience, a list of `Event`s: messages from
   people, agents and systems, thoughts, action requests and their results, anything the app appends. The app keeps it.
+  A message holds files too (`NewMessageEvent(source, text, files...)`): each adapter gives a user's files to its model
+  as it reads them (images, PDFs, text), and only the name of a file of another type.
 - **Invoke, Loop, Watch:** `Invoke` takes one turn; `Loop` takes turns until the strategy says the agent is done
   (`StopReasonEndTurn`) or it took `DefaultMaxTurns` (`StopReasonMaxTurns`, not an error); `Watch` loops on each event of
   a channel. Each returns a `SessionStream`: the updates as they come (whole events, chunks of text), and the session.
