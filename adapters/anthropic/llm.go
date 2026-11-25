@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -102,16 +103,10 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 				Effort: anthropic.OutputConfigEffort(m.effortOf(req)),
 			},
 		}
-		for _, tool := range req.Tools {
-			t := anthropic.ToolParam{
-				Name:        tool.ID,
-				Description: anthropic.String(tool.Description),
-				InputSchema: m.inputSchema(tool.InputSchema),
-			}
-			params.Tools = append(
-				params.Tools,
-				anthropic.ToolUnionParam{OfTool: &t},
-			)
+		var index string
+		params.Tools, index = m.mapTools(req.Tools)
+		if index != "" {
+			params.System = append(params.System, anthropic.TextBlockParam{Text: index})
 		}
 		if !m.Uncached {
 			m.markCachePoints(&params)
@@ -133,13 +128,72 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 func (m LLM) markCachePoints(params *anthropic.MessageNewParams) {
 	instructions := anthropic.NewCacheControlEphemeralParam()
 	instructions.TTL = m.InstructionsTTL
-	if len(params.Tools) > 0 {
-		params.Tools[len(params.Tools)-1].OfTool.CacheControl = instructions
-	}
+	markLastLoadedTool(params.Tools, instructions)
 	if len(params.System) > 0 {
 		params.System[len(params.System)-1].CacheControl = instructions
 	}
 	params.CacheControl = anthropic.NewCacheControlEphemeralParam()
+}
+
+// markLastLoadedTool puts the breakpoint on the last tool Claude is given up
+// front: the API refuses one on a deferred tool, which is not in the prefix.
+func markLastLoadedTool(tools []anthropic.ToolUnionParam, cacheControl anthropic.CacheControlEphemeralParam) {
+	for i := len(tools) - 1; i >= 0; i-- {
+		switch {
+		case tools[i].OfToolSearchToolRegex20251119 != nil:
+			tools[i].OfToolSearchToolRegex20251119.CacheControl = cacheControl
+			return
+		case tools[i].OfTool != nil && !tools[i].OfTool.DeferLoading.Value:
+			tools[i].OfTool.CacheControl = cacheControl
+			return
+		}
+	}
+}
+
+// mapTools is the actions as Claude's tools: the loaded ones first, then, when
+// some are deferred, Claude's regex tool search and the deferred ones, which
+// Claude loads by searching for them. The index lists the deferred ones, for
+// the system prompt: Claude does not see them until it searches.
+func (m LLM) mapTools(actions []proxias.ActionDescriptor) ([]anthropic.ToolUnionParam, string) {
+	var loaded, deferred []anthropic.ToolUnionParam
+	index := proxias.NewPrompt().AddSection(
+		"Actions to look up",
+		"These actions are not loaded. Before you call one, load it with "+
+			toolSearchName+", searching for its exact name (^name$), "+
+			"or for several at once (^prefix).",
+	)
+	for _, action := range actions {
+		t := anthropic.ToolParam{
+			Name:        action.ID,
+			Description: anthropic.String(action.Description),
+			InputSchema: m.inputSchema(action.InputSchema),
+		}
+		if !action.Deferred {
+			loaded = append(loaded, anthropic.ToolUnionParam{OfTool: &t})
+			continue
+		}
+		t.DeferLoading = anthropic.Bool(true)
+		deferred = append(deferred, anthropic.ToolUnionParam{OfTool: &t})
+		index.AddLabeledBulletPoint(action.ID, firstLine(action.Description))
+	}
+	if len(deferred) == 0 {
+		return loaded, ""
+	}
+
+	search := anthropic.ToolUnionParam{OfToolSearchToolRegex20251119: &anthropic.ToolSearchToolRegex20251119Param{
+		Type: anthropic.ToolSearchToolRegex20251119TypeToolSearchToolRegex20251119,
+	}}
+	loaded = append(loaded, search)
+	return append(loaded, deferred...), index.String()
+}
+
+// toolSearchName is the name of Claude's regex tool search.
+const toolSearchName = "tool_search_tool_regex"
+
+// firstLine is the first line of a text: an action's description in an index.
+func firstLine(text string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	return line
 }
 
 // modelOf is the request's model, or the LLM's when it names none.
@@ -266,6 +320,13 @@ func (m LLM) chunkOf(block anthropic.ContentBlockUnion) (proxias.LLMChunk, bool,
 		chunk.RedactedThinking = b.Data
 	case anthropic.TextBlock:
 		chunk.Text = b.Text
+	case anthropic.ServerToolUseBlock, anthropic.ToolSearchToolResultBlock:
+		// Claude's tool search: given back as it came, in later calls.
+		opaque, err := json.Marshal(block.ToParam())
+		if err != nil {
+			return proxias.LLMChunk{}, false, fmt.Errorf("anthropic: cannot keep a %s block: %w", block.Type, err)
+		}
+		chunk.Opaque = opaque
 	case anthropic.ToolUseBlock:
 		var input map[string]any
 		if len(b.Input) > 0 {
@@ -348,6 +409,16 @@ func (m LLM) mapMessages(conversation []proxias.LLMMessage, hasTools bool) []ant
 					continue
 				}
 				add(role, anthropic.NewRedactedThinkingBlock(part.RedactedThinking))
+			case len(part.Opaque) > 0:
+				if !hasTools {
+					// The API refuses a server tool's blocks without tools.
+					continue
+				}
+				var block anthropic.ContentBlockParamUnion
+				if err := json.Unmarshal(part.Opaque, &block); err != nil {
+					continue // not Claude's: another adapter's block
+				}
+				add(role, block)
 			case part.ToolCall != nil:
 				if !hasTools {
 					// The API refuses a tool_use block without tools.

@@ -88,6 +88,10 @@ type LLMPart struct {
 	Thinking         string
 	Signature        string
 	RedactedThinking string
+	// Opaque is a block of the model's answer that only its adapter reads (a
+	// vendor's server tool call, such as Anthropic's tool search), given back
+	// as it came, in its order.
+	Opaque json.RawMessage `json:",omitempty"`
 }
 
 // LLMToolCall is a model's call of a tool: an action request.
@@ -117,12 +121,14 @@ type LLMChunk struct {
 	Thinking         string
 	Signature        string
 	RedactedThinking string
-	StopReason       StopReason `json:",omitempty"`
+	Opaque           json.RawMessage `json:",omitempty"`
+	StopReason       StopReason      `json:",omitempty"`
 }
 
-// isThinking tells whether the chunk is a block of thinking, signed or not.
+// isThinking tells whether the chunk is a block kept whole: thinking, signed or
+// not, or an opaque block.
 func (c LLMChunk) isThinking() bool {
-	return c.Thinking != "" || c.Signature != "" || c.RedactedThinking != ""
+	return c.Thinking != "" || c.Signature != "" || c.RedactedThinking != "" || len(c.Opaque) > 0
 }
 
 // NewLLMRequestFromSession creates an LLMRequest from a session.
@@ -227,6 +233,7 @@ func newLLMMessageFromThoughtEvent(currentAgentSource EventSource, e Event) LLMM
 		Thinking:         chunk.Thinking,
 		Signature:        chunk.Signature,
 		RedactedThinking: chunk.RedactedThinking,
+		Opaque:           chunk.Opaque,
 	}
 	return LLMMessage{
 		Role:  LLMMessageRoleAssistant,
@@ -345,6 +352,7 @@ func newThoughtEventsFromLLMMessage(currentAgentSource EventSource, m LLMMessage
 			Thinking:         part.Thinking,
 			Signature:        part.Signature,
 			RedactedThinking: part.RedactedThinking,
+			Opaque:           part.Opaque,
 		}
 		if chunk.isThinking() {
 			thoughts = append(thoughts, NewThoughtEvent(currentAgentSource, chunk))

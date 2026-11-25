@@ -557,6 +557,101 @@ func TestLLMComplete(t *testing.T) {
 			},
 			messages: `[{"role":"user","content":[{"type":"text","text":"something harmful"}]}]`,
 		},
+		{
+			name:   "GIVEN deferred actions THEN they are deferred after Claude's tool search, which is cached, and listed in the system prompt",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[]}`,
+			when: proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role:  proxias.LLMMessageRoleSystem,
+						Parts: []proxias.LLMPart{{Text: "Be brief."}},
+					},
+				},
+				Tools: []proxias.ActionDescriptor{
+					{ID: "send_email", Description: "Sends an email.", Deferred: true},
+					{ID: "get_time", Description: "The time."},
+				},
+			},
+			then:     []proxias.LLMChunk{{StopReason: proxias.StopReasonEndTurn}},
+			messages: `[{"role":"user","content":[{"type":"text","text":"(nothing happened yet)"}]}]`,
+			system: `[
+				{"type":"text","text":"Be brief."},
+				{"type":"text","text":"## Actions to look up\nThese actions are not loaded. Before you call one, load it with tool_search_tool_regex, searching for its exact name (^name$), or for several at once (^prefix).\n- send_email: Sends an email.","cache_control":{"type":"ephemeral"}}
+			]`,
+			tools: `[
+				{"name":"get_time","description":"The time.","input_schema":{"type":"object","properties":{}}},
+				{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex","cache_control":{"type":"ephemeral"}},
+				{"name":"send_email","description":"Sends an email.","input_schema":{"type":"object","properties":{}},"defer_loading":true}
+			]`,
+		},
+		{
+			name:   "GIVEN Claude searches for a tool THEN its search blocks are handed out kept whole, before its tool call",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"tool_use","usage":{},"content":[
+				{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"^send_email$"}},
+				{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"send_email"}]}},
+				{"type":"tool_use","id":"toolu_1","name":"send_email","input":{}}]}`,
+			when: proxias.LLMRequest{
+				Messages: []proxias.LLMMessage{
+					{
+						Role:  proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{{Text: "email Bob"}},
+					},
+				},
+			},
+			then: []proxias.LLMChunk{
+				{Opaque: json.RawMessage(`{"id":"srvtoolu_1","input":{"pattern":"^send_email$"},"name":"tool_search_tool_regex","type":"server_tool_use"}`)},
+				{Opaque: json.RawMessage(`{"content":{"tool_references":[{"tool_name":"send_email","type":"tool_reference"}],"type":"tool_search_tool_search_result"},"tool_use_id":"srvtoolu_1","type":"tool_search_tool_result"}`)},
+				{
+					ToolCall: &proxias.LLMToolCall{
+						ID:    "toolu_1",
+						Name:  "send_email",
+						Input: map[string]any{},
+					},
+				},
+			},
+			messages: `[{"role":"user","content":[{"type":"text","text":"email Bob"}]}]`,
+		},
+		{
+			name:   "GIVEN the search blocks of an earlier answer THEN they are given back as they came, before its tool call",
+			status: http.StatusOK,
+			answer: `{"id":"m","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{},"content":[{"type":"text","text":"Sent."}]}`,
+			when: proxias.LLMRequest{
+				Tools: []proxias.ActionDescriptor{{ID: "send_email", Deferred: true}},
+				Messages: []proxias.LLMMessage{
+					{
+						Role:  proxias.LLMMessageRoleUser,
+						Parts: []proxias.LLMPart{{Text: "email Bob"}},
+					},
+					{
+						Role: proxias.LLMMessageRoleAssistant,
+						Parts: []proxias.LLMPart{
+							{Opaque: json.RawMessage(`{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"^send_email$"}}`)},
+							{Opaque: json.RawMessage(`{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"send_email"}]}}`)},
+							{ToolCall: &proxias.LLMToolCall{ID: "toolu_1", Name: "send_email"}},
+						},
+					},
+					{
+						Role:  proxias.LLMMessageRoleTool,
+						Parts: []proxias.LLMPart{{ToolResult: &proxias.LLMToolResult{CallID: "toolu_1", Content: "sent"}}},
+					},
+				},
+			},
+			then: []proxias.LLMChunk{
+				{Text: "Sent."},
+				{StopReason: proxias.StopReasonEndTurn},
+			},
+			messages: `[
+				{"role":"user","content":[{"type":"text","text":"email Bob"}]},
+				{"role":"assistant","content":[
+					{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"^send_email$"}},
+					{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"send_email"}]}},
+					{"type":"tool_use","id":"toolu_1","name":"send_email","input":{}}
+				]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"sent"}],"is_error":false}]}
+			]`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

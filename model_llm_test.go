@@ -1,6 +1,7 @@
 package proxias_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -93,6 +94,18 @@ func TestNewLLMMessage(t *testing.T) {
 				Parts: []proxias.LLMPart{
 					{Text: "An email."},
 				},
+			},
+		},
+		{
+			name: "GIVEN the agent's thought of an opaque block THEN the block, given back as it came",
+			given: proxias.Event{
+				Type:    proxias.EventTypeThought,
+				Source:  proxias.NewAgentSource("ada"),
+				Payload: []byte(`{"Opaque":{"type":"server_tool_use"}}`),
+			},
+			then: proxias.LLMMessage{
+				Role:  proxias.LLMMessageRoleAssistant,
+				Parts: []proxias.LLMPart{{Opaque: json.RawMessage(`{"type":"server_tool_use"}`)}},
 			},
 		},
 		{
@@ -477,6 +490,25 @@ func TestNewEventsFromLLMMessage(t *testing.T) {
 			},
 			then: []string{
 				`cognition.thought agent:ada {"Text":"","ToolCall":null,"Thinking":"John wants an email.","Signature":"sig","RedactedThinking":""}`,
+				`action.request agent:ada toolu_1 {"action_id":"send_email"}`,
+			},
+		},
+		{
+			name: "GIVEN an opaque block and a tool call THEN the block is a thought, kept whole, then the request",
+			given: proxias.LLMMessage{
+				Role: proxias.LLMMessageRoleAssistant,
+				Parts: []proxias.LLMPart{
+					{Opaque: json.RawMessage(`{"type":"server_tool_use"}`)},
+					{
+						ToolCall: &proxias.LLMToolCall{
+							ID:   "toolu_1",
+							Name: "send_email",
+						},
+					},
+				},
+			},
+			then: []string{
+				`cognition.thought agent:ada {"Text":"","ToolCall":null,"Thinking":"","Signature":"","RedactedThinking":"","Opaque":{"type":"server_tool_use"}}`,
 				`action.request agent:ada toolu_1 {"action_id":"send_email"}`,
 			},
 		},
