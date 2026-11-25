@@ -24,8 +24,8 @@ type LLM struct {
 	model  anthropic.Model
 	// MaxTokens is the tokens an answer may take: DefaultMaxTokens by default.
 	MaxTokens int64
-	// InstructionsTTL is how long the system prompt (and the tools before it)
-	// stays cached: Claude's default (5 minutes) when empty, or
+	// InstructionsTTL is how long the tools and the system prompt stay
+	// cached: Claude's default (5 minutes) when empty, or
 	// anthropic.CacheControlEphemeralTTLTTL1h for instructions that every
 	// conversation shares and that a person may come back to after a pause.
 	InstructionsTTL anthropic.CacheControlEphemeralTTL
@@ -40,6 +40,10 @@ type LLM struct {
 	// the model's default when empty. A request's own Effort overrides it.
 	// Models before Claude 4.6 refuse it.
 	Effort proxias.Effort
+	// Uncached sends nothing to cache, for calls whose start no later call
+	// shares (a one-off question): a cache write costs more than reading the
+	// input once.
+	Uncached bool
 	// Buffered has Complete read the answer whole, then hand it out, instead
 	// of streaming it: by default its text and its thinking are handed out as
 	// Claude writes them, each of its other blocks (thinking, tool calls) once
@@ -49,9 +53,9 @@ type LLM struct {
 
 var _ proxias.LLM = LLM{}
 
-// NewLLM returns the model of the client as an proxias.LLM: the system prompt
-// is cached (with the tools, which come before it), and so is the conversation
-// so far (its automatic breakpoint moves to its end at every call, so the
+// NewLLM returns the model of the client as an proxias.LLM: the tools are
+// cached, then the system prompt, each at its own breakpoint, and so is the
+// conversation so far (its automatic breakpoint moves to its end at every call, so the
 // turns of a loop read it from the cache); the conversation is Claude's (tool
 // calls as tool_use blocks, their results as tool_result blocks), and the
 // answer is streamed (Buffered reads it whole).
@@ -96,13 +100,6 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 			OutputConfig: anthropic.OutputConfigParam{
 				Effort: anthropic.OutputConfigEffort(m.effortOf(req)),
 			},
-			CacheControl: anthropic.NewCacheControlEphemeralParam(),
-		}
-		if len(params.System) > 0 {
-			last := len(params.System) - 1
-			cacheControl := anthropic.NewCacheControlEphemeralParam()
-			cacheControl.TTL = m.InstructionsTTL
-			params.System[last].CacheControl = cacheControl
 		}
 		for _, tool := range req.Tools {
 			t := anthropic.ToolParam{
@@ -115,6 +112,9 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 				anthropic.ToolUnionParam{OfTool: &t},
 			)
 		}
+		if !m.Uncached {
+			m.markCachePoints(&params)
+		}
 
 		if m.Buffered {
 			m.complete(ctx, params, yield)
@@ -122,6 +122,23 @@ func (m LLM) Complete(ctx context.Context, req proxias.LLMRequest) iter.Seq2[pro
 		}
 		m.stream(ctx, params, yield)
 	}
+}
+
+// markCachePoints caches the tools, the system prompt and the conversation, each
+// at its own breakpoint: the tools rarely change, the system prompt now and
+// then, the conversation at every call, so a change to one does not write the
+// ones before it again. The tools and the system prompt are kept for
+// InstructionsTTL, the conversation for Claude's default.
+func (m LLM) markCachePoints(params *anthropic.MessageNewParams) {
+	instructions := anthropic.NewCacheControlEphemeralParam()
+	instructions.TTL = m.InstructionsTTL
+	if len(params.Tools) > 0 {
+		params.Tools[len(params.Tools)-1].OfTool.CacheControl = instructions
+	}
+	if len(params.System) > 0 {
+		params.System[len(params.System)-1].CacheControl = instructions
+	}
+	params.CacheControl = anthropic.NewCacheControlEphemeralParam()
 }
 
 // modelOf is the request's model, or the LLM's when it names none.
