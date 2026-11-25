@@ -141,6 +141,7 @@ func NewThoughtEvent(source EventSource, chunk LLMChunk) Event {
 		Thinking:         chunk.Thinking,
 		Signature:        chunk.Signature,
 		RedactedThinking: chunk.RedactedThinking,
+		Opaque:           chunk.Opaque,
 	}
 	payload, _ := json.Marshal(thinking) // strings marshal
 

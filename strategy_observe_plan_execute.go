@@ -274,6 +274,7 @@ func (s ObservePlanExecuteCognitiveStrategy) report(
 				Thinking:         chunk.Thinking,
 				Signature:        chunk.Signature,
 				RedactedThinking: chunk.RedactedThinking,
+				Opaque:           chunk.Opaque,
 			}
 			message.Parts = append(message.Parts, thinking)
 		case chunk.Text != "":

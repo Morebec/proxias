@@ -20,6 +20,11 @@ type ActionDescriptor struct {
 	Description string `json:"description"`
 	// InputSchema is the JSON Schema of the action's parameters, if it has any.
 	InputSchema map[string]any `json:"schema,omitempty"`
+	// Deferred tells that the model is not given the action's schema up front,
+	// only its ID and description in an index, and loads the schema when it
+	// needs the action: for the many actions an agent rarely runs. How it loads
+	// it is the LLM adapter's.
+	Deferred bool `json:"deferred,omitempty"`
 }
 
 // ActionExecutionRequest asks to run an action: the payload of an action
